@@ -34,7 +34,7 @@ EPISODE_DATA_DIR = PROJECT_ROOT / "data" / "episodes"
 MODEL_SAVE_DIR = PROJECT_ROOT / "models"
 
 # 訓練パラメータ
-NUM_EPISODES = 10000  # 訓練エピソード数
+NUM_EPISODES = 700  # 訓練エピソード数
 REPLAY_BUFFER_SIZE = 10000  # リプレイバッファのサイズ
 BATCH_SIZE = 128
 GAMMA = 0.99  # 割引率
