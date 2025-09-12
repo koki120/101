@@ -384,8 +384,6 @@ def _start_total_from_card(card: Card) -> int:
 def _round_draw_and_continue(
     s: State, reward: float, info: dict[str, int | str | int | None]
 ) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
-
-
     next_state = _start_next_round(
         players=s.players,
         alive=s.alive,
