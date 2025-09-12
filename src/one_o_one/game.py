@@ -384,15 +384,7 @@ def _start_total_from_card(card: Card) -> int:
 def _round_draw_and_continue(
     s: State, reward: float, info: dict[str, int | str | int | None]
 ) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
-    """Handle the case when the deck runs out of cards.
 
-    Previously this function would call ``_start_next_round`` and then manually
-    restore the previous penalty level. This was necessary because
-    ``_start_next_round`` ignored its ``carry_penalty_level`` flag and always
-    reset the penalty to 1. After fixing ``_start_next_round`` to respect the
-    flag, we can simply forward the current penalty level and rely on it to
-    initialise the next state correctly.
-    """
 
     next_state = _start_next_round(
         players=s.players,
