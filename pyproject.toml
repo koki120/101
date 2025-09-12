@@ -50,3 +50,9 @@ python_version = "3.11"
 strict = true
 # 外部ライブラリの型情報がなくてもエラーにしない
 ignore_missing_imports = true
+
+[tool.rye.scripts]
+mypy = "mypy"
+
+[tool.hatch.metadata]
+allow-direct-references = true
