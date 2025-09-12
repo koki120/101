@@ -86,9 +86,7 @@ class AIAgent:
         self.policy_net = DuelingDQN(STATE_SIZE, ACTION_SIZE).to(self.device)
 
         if not model_path.exists():
-            raise FileNotFoundError(
-                f"学習済みモデルが見つかりません: {model_path}"
-            )
+            raise FileNotFoundError(f"学習済みモデルが見つかりません: {model_path}")
 
         logger.info("Loading model from: %s", model_path)
         self.policy_net.load_state_dict(
@@ -164,9 +162,7 @@ def main():
         with open(OUTPUT_DATA_PATH, "w", encoding="utf-8") as f:
             json.dump(game_data, f, indent=4)
 
-        logger.info(
-            "Successfully collected and saved data for %d game(s).", NUM_GAMES
-        )
+        logger.info("Successfully collected and saved data for %d game(s).", NUM_GAMES)
         logger.info("Data saved to: %s", OUTPUT_DATA_PATH)
 
     except FileNotFoundError as e:
