@@ -21,12 +21,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from one_o_one.game import (
-    Action,
-    State,
-    step,
-)
-
+from one_o_one.game import Action, Card, State, reset, step
 
 logger = logging.getLogger(__name__)
 
@@ -60,19 +55,23 @@ def _to_one_hot(num: int, max_val: int) -> list[float]:
     return [1.0 if i == num else 0.0 for i in range(max_val)]
 
 
+def _rank_value(card: Card | None) -> int:
+    return int(card.rank) if card is not None else 0
+
+
 def get_vector(s: State) -> np.ndarray:
     """ゲーム状態をAIの入力となる固定長のベクトルに変換する。"""
-    me = s.players[s.public.current_player]
-    hand_vec = _to_one_hot(me.hand[0].value, 14) + _to_one_hot(me.hand[1].value, 14)
+    me = s.players[s.public.turn]
+    hand_vec = _to_one_hot(_rank_value(me.hand[0]), 16) + _to_one_hot(
+        _rank_value(me.hand[1]), 16
+    )
     total_vec = [s.public.total / 101.0]
     dir_vec = [1.0 if s.public.direction == 1 else 0.0]
-    penalty_vec = [(s.public.penalty - 1) / 5.0]
+    penalty_vec = [(s.public.penalty_level - 1) / 5.0]
 
-    # 状態ベクトルを結合
     state_vector = np.array(
         hand_vec + total_vec + dir_vec + penalty_vec, dtype=np.float32
     )
-    # 期待されるサイズになるようにパディング
     return np.pad(
         state_vector,
         (0, STATE_SIZE - len(state_vector)),
@@ -84,7 +83,7 @@ def get_vector(s: State) -> np.ndarray:
 # --- AIモデル (Dueling DQN) ---
 
 
-class DuelingDQN(nn.Module):
+class DuelingDQN(nn.Module):  # type: ignore[misc]
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):
@@ -98,10 +97,12 @@ class DuelingDQN(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        features = self.feature_layer(x)
-        advantages = self.advantage_stream(features)
-        values = self.value_stream(features)
-        qvals = values + (advantages - advantages.mean(dim=1, keepdim=True))
+        features: torch.Tensor = self.feature_layer(x)
+        advantages: torch.Tensor = self.advantage_stream(features)
+        values: torch.Tensor = self.value_stream(features)
+        qvals: torch.Tensor = values + (
+            advantages - advantages.mean(dim=1, keepdim=True)
+        )
         return qvals
 
 
@@ -112,7 +113,9 @@ class ReplayBuffer:
     """経験を保存し、ランダムサンプリングするためのバッファ。"""
 
     def __init__(self, capacity: int):
-        self.buffer: deque[tuple] = deque(maxlen=capacity)
+        self.buffer: deque[tuple[np.ndarray, int, float, np.ndarray, bool]] = deque(
+            maxlen=capacity
+        )
 
     def push(
         self,
@@ -121,7 +124,7 @@ class ReplayBuffer:
         reward: float,
         next_state: np.ndarray,
         done: bool,
-    ):
+    ) -> None:
         self.buffer.append((state, action, reward, next_state, done))
 
     def sample(
@@ -173,7 +176,7 @@ class DQNAgent:
             q_values = self.policy_net(state_tensor)
             return Action(q_values.argmax().item())
 
-    def learn(self):
+    def learn(self) -> None:
         """リプレイバッファからの経験を用いてネットワークを更新する。"""
         if len(self.memory) < BATCH_SIZE:
             return
@@ -201,7 +204,7 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
 
-    def update_epsilon(self):
+    def update_epsilon(self) -> None:
         """εを減衰させる。"""
         self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
 
@@ -209,7 +212,7 @@ class DQNAgent:
 # --- 自己対戦と学習ループ ---
 
 
-def main():
+def main() -> None:
     """学習のメインループを実行する。"""
     # 保存用ディレクトリを作成
     EPISODE_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -225,9 +228,9 @@ def main():
     all_episode_data = []
 
     for episode in range(NUM_EPISODES):
-        s: State = State.initial()
-        episode_reward = 0
-        episode_data: list[dict] = []
+        s: State = reset(4)
+        episode_reward = 0.0
+        episode_data: list[dict[str, object]] = []
         done = False
 
         while not done:

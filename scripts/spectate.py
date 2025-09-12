@@ -224,7 +224,7 @@ HTML_TEMPLATE = """
 """
 
 
-def create_and_show_replay():
+def create_and_show_replay() -> None:
     """ゲームデータからHTMLリプレイファイルを生成し、ブラウザで表示する。"""
     try:
         # データを読み込む
