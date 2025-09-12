@@ -62,7 +62,7 @@ def get_vector(s: State) -> np.ndarray:
     )
 
 
-class DuelingDQN(nn.Module):  # type: ignore[misc]
+class DuelingDQN(nn.Module):
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):
@@ -106,7 +106,7 @@ class AIAgent:
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             q_values: torch.Tensor = self.policy_net(state_tensor)
-            return Action(q_values.argmax().item())
+            return Action(int(q_values.argmax().item()))
 
 
 # --- データ収集メイン処理 ---

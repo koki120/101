@@ -83,7 +83,7 @@ def get_vector(s: State) -> np.ndarray:
 # --- AIモデル (Dueling DQN) ---
 
 
-class DuelingDQN(nn.Module):  # type: ignore[misc]
+class DuelingDQN(nn.Module):
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):
@@ -173,8 +173,8 @@ class DQNAgent:
 
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.policy_net(state_tensor)
-            return Action(q_values.argmax().item())
+            q_values: torch.Tensor = self.policy_net(state_tensor)
+            return Action(int(q_values.argmax().item()))
 
     def learn(self) -> None:
         """リプレイバッファからの経験を用いてネットワークを更新する。"""
@@ -198,10 +198,12 @@ class DQNAgent:
 
         current_q_values = self.policy_net(states_t).gather(1, actions_t)
 
-        loss = nn.functional.smooth_l1_loss(current_q_values, target_q_values)
+        loss: torch.Tensor = nn.functional.smooth_l1_loss(
+            current_q_values, target_q_values
+        )
 
         self.optimizer.zero_grad()
-        loss.backward()
+        torch.autograd.backward(loss)
         self.optimizer.step()
 
     def update_epsilon(self) -> None:
