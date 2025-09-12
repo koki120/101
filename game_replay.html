@@ -107,10 +107,10 @@
         const totalDisplay = document.getElementById('total-display');
         const penaltyDisplay = document.getElementById('penalty-display');
         const eventDisplay = document.getElementById('event-display');
-        const playerAreas = Array.from(
-            {0: 'p0', 1: 'p1', 2: 'p2', 3: 'p3'},
-            ([_, v]) => document.getElementById(v)
-        );
+        // Array.from でオブジェクトを渡していたため空配列となり、
+        // playerAreas[i] が undefined になるバグがあった。
+        // プレイヤーエリアの要素を確実に取得できるよう修正。
+        const playerAreas = Array.from({ length: 4 }, (_, i) => document.getElementById(`p${i}`));
 
         let currentTurn = 0;
 
