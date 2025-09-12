@@ -37,7 +37,7 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p public/data
-          cp game_replay.html public/
+          mv game_replay.html public/index.html
           cp data/game_data_for_spectate.json public/data/
 
       - name: Upload artifact
