@@ -1,0 +1,57 @@
+name: Deploy Game Replay
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rye
+        uses: eifinger/setup-rye@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: rye sync
+
+      - name: Generate game data
+        run: rye run python scripts/collect_data.py
+
+      - name: Generate replay HTML
+        run: rye run python scripts/spectate.py
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p public/data
+          cp game_replay.html public/
+          cp data/game_data_for_spectate.json public/data/
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
