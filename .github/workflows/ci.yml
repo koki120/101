@@ -1,0 +1,28 @@
+name: Python CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Ryeのセットアップと依存関係のキャッシュを有効化
+      - name: Set up Rye
+        uses: eifinger/setup-rye@v4
+        with:
+          enable-cache: true
+
+      - name: Run formatter check
+        run: rye fmt --check
+
+      - name: Run linter
+        run: rye lint
+
+      - name: Run type checker
+        run: rye run mypy .
+
+      - name: Run tests
+        run: rye test

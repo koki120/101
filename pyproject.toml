@@ -5,7 +5,12 @@ description = "Add your description here"
 authors = [
     { name = "koki120", email = "116272673+koki120@users.noreply.github.com" }
 ]
-dependencies = []
+dependencies = [
+    "torch>=2.8.0",
+    "numpy>=2.3.3",
+    "pandas>=2.3.2",
+    "pyarrow>=21.0.0",
+]
 readme = "README.md"
 requires-python = ">= 3.8"
 
@@ -15,10 +20,33 @@ build-backend = "hatchling.build"
 
 [tool.rye]
 managed = true
-dev-dependencies = []
+dev-dependencies = [
+    "ruff>=0.13.0",
+    "mypy>=1.18.1",
+    "pytest>=8.4.2",
+]
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/_101"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+# 基本的なルールセットに加え、コーディング規約で禁止されているprint文(T20)を検出
+select = ["E", "W", "F", "B", "I", "UP", "N", "T20"]
+
+[tool.ruff.format]
+# Black互換のフォーマットを有効化
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+# コーディング規約の思想に沿った厳格な型チェックを有効化
+strict = true
+# 外部ライブラリの型情報がなくてもエラーにしない
+ignore_missing_imports = true
