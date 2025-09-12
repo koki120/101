@@ -44,7 +44,7 @@ EPS_DECAY = 0.995
 TARGET_UPDATE = 10  # ターゲットネットワークの更新頻度
 LEARNING_RATE = 0.001
 STATE_SIZE = 35  # 状態ベクトルのサイズ
-ACTION_SIZE = 4  # アクションの数
+ACTION_SIZE = 3  # アクションの数
 
 
 # --- 状態のベクトル化 ---

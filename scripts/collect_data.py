@@ -28,7 +28,7 @@ OUTPUT_DATA_PATH = PROJECT_ROOT / "data" / "game_data_for_spectate.json"
 
 NUM_GAMES = 1  # 生成するゲーム数
 STATE_SIZE = 35
-ACTION_SIZE = 4
+ACTION_SIZE = 3
 
 # --- AIモデルと状態ベクトル化関数 (train_ai.pyから再利用) ---
 
