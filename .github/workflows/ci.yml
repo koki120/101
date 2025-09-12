@@ -15,6 +15,9 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install dependencies
+        run: rye sync
+
       - name: Run formatter check
         run: rye fmt --check
 
