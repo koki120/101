@@ -62,18 +62,18 @@ def test_reverse_card_reverses_direction():
     )
     state_after_reverse, _, _, _ = step(state_forward, Action.PLAY_HAND_0)
     assert state_after_reverse.public.direction == -1, "進行方向が+1から-1に変わるべき"
-    assert (
-        state_after_reverse.public.total == 50
-    ), "9のカードで合計値が変動してはならない"
+    assert state_after_reverse.public.total == 50, (
+        "9のカードで合計値が変動してはならない"
+    )
 
     # 逆方向 -> 正方向
     state_backward = _mk_state_for_test(
         total=50, my_hand=(Rank.R9, Rank.R2), direction=-1
     )
     state_after_reverse_2, _, _, _ = step(state_backward, Action.PLAY_HAND_0)
-    assert (
-        state_after_reverse_2.public.direction == +1
-    ), "進行方向が-1から+1に変わるべき"
+    assert state_after_reverse_2.public.direction == +1, (
+        "進行方向が-1から+1に変わるべき"
+    )
 
 
 def test_ten_card_subtracts_10_from_total():
@@ -102,9 +102,9 @@ def test_bust_reduces_lp_and_resets_board():
     next_state, _, done, _ = step(initial_state, Action.PLAY_HAND_0)
 
     assert done is True, "バーストしたためラウンドが終了するべき"
-    assert (
-        next_state.players[0].lp == 10 - 3
-    ), "現在のペナルティレベル(3)分のダメージを受けるべき"
+    assert next_state.players[0].lp == 10 - 3, (
+        "現在のペナルティレベル(3)分のダメージを受けるべき"
+    )
     assert next_state.public.total == 0, "バースト後は合計値が0にリセットされるべき"
     assert next_state.public.penalty == 1, "バースト後はペナルティが1に戻るべき"
 
@@ -116,9 +116,9 @@ def test_exact_101_resets_total_and_increases_penalty():
 
     assert done is False, "101リセットではラウンドは終了しない"
     assert next_state.public.total == 0, "101リセット後は合計値が0にリセットされるべき"
-    assert (
-        next_state.public.penalty == 3 + 1
-    ), "101リセット後はペナルティが1増加するべき"
+    assert next_state.public.penalty == 3 + 1, (
+        "101リセット後はペナルティが1増加するべき"
+    )
     assert next_state.players[0].lp == 10, "101リセットではLPは減少しない"
 
 
