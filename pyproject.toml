@@ -26,6 +26,9 @@ dev-dependencies = [
     "pytest>=8.4.2",
 ]
 
+[tool.rye.scripts]
+mypy = "mypy"
+
 [tool.hatch.metadata]
 allow-direct-references = true
 
