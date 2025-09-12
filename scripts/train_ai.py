@@ -9,6 +9,7 @@ Dueling Double Deep Q-Network (D3QN) を使用し、
 - モデルの重み: <プロジェクトルート>/models/
 """
 
+import logging
 import random
 import warnings
 from collections import deque
@@ -25,6 +26,9 @@ from one_o_one.game import (
     State,
     step,
 )
+
+
+logger = logging.getLogger(__name__)
 
 # 将来の非推奨に関する警告を非表示にする
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.functional")
@@ -148,7 +152,7 @@ class DQNAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {self.device}")
+        logger.info("Using device: %s", self.device)
 
         self.policy_net = DuelingDQN(state_size, action_size).to(self.device)
         self.target_net = DuelingDQN(state_size, action_size).to(self.device)
@@ -214,7 +218,7 @@ def main():
     agent = DQNAgent(STATE_SIZE, ACTION_SIZE)
     model_path = MODEL_SAVE_DIR / "101_d3qn.pth"
     if model_path.exists():
-        print(f"Loading model from {model_path}")
+        logger.info("Loading model from %s", model_path)
         agent.policy_net.load_state_dict(torch.load(model_path))
         agent.target_net.load_state_dict(agent.policy_net.state_dict())
 
@@ -227,7 +231,6 @@ def main():
         done = False
 
         while not done:
-            current_player = s.public.current_player
             state_vec = get_vector(s)
             action = agent.select_action(state_vec)
 
@@ -248,8 +251,11 @@ def main():
             agent.target_net.load_state_dict(agent.policy_net.state_dict())
 
         if episode % 100 == 0:
-            print(
-                f"Episode {episode}, Total Reward: {episode_reward}, Epsilon: {agent.epsilon:.4f}"
+            logger.info(
+                "Episode %d, Total Reward: %s, Epsilon: %.4f",
+                episode,
+                episode_reward,
+                agent.epsilon,
             )
             # モデルを保存
             torch.save(agent.policy_net.state_dict(), model_path)
@@ -259,10 +265,11 @@ def main():
             df.to_parquet(EPISODE_DATA_DIR / f"episode_data_{episode}.parquet")
             all_episode_data = []
 
-    print("Training finished.")
+    logger.info("Training finished.")
     torch.save(agent.policy_net.state_dict(), model_path)
-    print(f"Final model saved to {model_path}")
+    logger.info("Final model saved to %s", model_path)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

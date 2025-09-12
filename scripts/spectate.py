@@ -10,6 +10,7 @@
 """
 
 import json
+import logging
 import webbrowser
 from pathlib import Path
 
@@ -17,6 +18,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = PROJECT_ROOT / "data" / "game_data_for_spectate.json"
 OUTPUT_HTML_PATH = PROJECT_ROOT / "game_replay.html"
+
+
+logger = logging.getLogger(__name__)
 
 
 # --- HTML, CSS, JavaScript テンプレート ---
@@ -130,7 +134,10 @@ HTML_TEMPLATE = """
         const totalDisplay = document.getElementById('total-display');
         const penaltyDisplay = document.getElementById('penalty-display');
         const eventDisplay = document.getElementById('event-display');
-        const playerAreas = Array.from({{0: 'p0', 1: 'p1', 2: 'p2', 3: 'p3'}}, ([_, v]) => document.getElementById(v));
+        const playerAreas = Array.from(
+            {{0: 'p0', 1: 'p1', 2: 'p2', 3: 'p3'}},
+            ([_, v]) => document.getElementById(v)
+        );
 
         let currentTurn = 0;
 
@@ -198,8 +205,12 @@ HTML_TEMPLATE = """
                         <div class="lp-bar" style="width: ${{lps[i] * 10}}%"></div>
                     </div>
                     <div class="hand">
-                        <div class="card">${{hand[0] !== undefined ? hand[0] : '?'}}</div>
-                        <div class="card">${{hand[1] !== undefined ? hand[1] : '?'}}</div>
+                        <div class="card">
+                            ${{hand[0] !== undefined ? hand[0] : '?'}}
+                        </div>
+                        <div class="card">
+                            ${{hand[1] !== undefined ? hand[1] : '?'}}
+                        </div>
                     </div>
                 `;
             }}
@@ -228,17 +239,21 @@ def create_and_show_replay():
         with open(OUTPUT_HTML_PATH, "w", encoding="utf-8") as f:
             f.write(final_html)
 
-        print(f"✅ Replay HTML file has been generated: {OUTPUT_HTML_PATH.name}")
+        logger.info(
+            "Replay HTML file has been generated: %s",
+            OUTPUT_HTML_PATH.name,
+        )
 
         # ブラウザで開く
         webbrowser.open_new_tab(OUTPUT_HTML_PATH.as_uri())
 
     except FileNotFoundError:
-        print(f"❌ Error: Data file not found at '{DATA_PATH}'")
-        print("Please run 'collect_data.py' first to generate the game data.")
+        logger.error("Error: Data file not found at '%s'", DATA_PATH)
+        logger.error("Please run 'collect_data.py' first to generate the game data.")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        logger.error("An unexpected error occurred: %s", e)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     create_and_show_replay()
