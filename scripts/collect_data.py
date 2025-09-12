@@ -17,8 +17,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from one_o_one.game import Action, State, step
-
+from one_o_one.game import Action, Card, State, reset, step
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +38,19 @@ def _to_one_hot(num: int, max_val: int) -> list[float]:
     return [1.0 if i == num else 0.0 for i in range(max_val)]
 
 
+def _rank_value(card: Card | None) -> int:
+    return int(card.rank) if card is not None else 0
+
+
 def get_vector(s: State) -> np.ndarray:
     """ゲーム状態をAIの入力となる固定長のベクトルに変換する。"""
-    me = s.players[s.public.current_player]
-    hand_vec = _to_one_hot(me.hand[0].value, 14) + _to_one_hot(me.hand[1].value, 14)
+    me = s.players[s.public.turn]
+    hand_vec = _to_one_hot(_rank_value(me.hand[0]), 16) + _to_one_hot(
+        _rank_value(me.hand[1]), 16
+    )
     total_vec = [s.public.total / 101.0]
     dir_vec = [1.0 if s.public.direction == 1 else 0.0]
-    penalty_vec = [(s.public.penalty - 1) / 5.0]
+    penalty_vec = [(s.public.penalty_level - 1) / 5.0]
     state_vector = np.array(
         hand_vec + total_vec + dir_vec + penalty_vec, dtype=np.float32
     )
@@ -57,7 +62,7 @@ def get_vector(s: State) -> np.ndarray:
     )
 
 
-class DuelingDQN(nn.Module):
+class DuelingDQN(nn.Module):  # type: ignore[misc]
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):
@@ -71,10 +76,12 @@ class DuelingDQN(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        features = self.feature_layer(x)
-        advantages = self.advantage_stream(features)
-        values = self.value_stream(features)
-        qvals = values + (advantages - advantages.mean(dim=1, keepdim=True))
+        features: torch.Tensor = self.feature_layer(x)
+        advantages: torch.Tensor = self.advantage_stream(features)
+        values: torch.Tensor = self.value_stream(features)
+        qvals: torch.Tensor = values + (
+            advantages - advantages.mean(dim=1, keepdim=True)
+        )
         return qvals
 
 
@@ -98,19 +105,19 @@ class AIAgent:
         """現在の状態で最も評価値が高い行動を選択する。"""
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.policy_net(state_tensor)
+            q_values: torch.Tensor = self.policy_net(state_tensor)
             return Action(q_values.argmax().item())
 
 
 # --- データ収集メイン処理 ---
 
 
-def collect_game_data(agent: AIAgent, num_games: int) -> list[dict]:
+def collect_game_data(agent: AIAgent, num_games: int) -> list[dict[str, object]]:
     """指定された数のゲームシミュレーションを行い、ログを収集する。"""
     all_games_data = []
     for i in range(num_games):
         logger.info("Simulating game %d/%d...", i + 1, num_games)
-        s = State.initial()
+        s = reset(4)
         game_log = []
         done = False
         turn = 0
@@ -121,22 +128,27 @@ def collect_game_data(agent: AIAgent, num_games: int) -> list[dict]:
             next_s, reward, done, _ = step(s, action)
 
             # 観戦用に詳細なログを記録
+            cur_idx = s.public.turn
+            if action in (Action.PLAY_HAND_0, Action.PLAY_HAND_1):
+                card = s.players[cur_idx].hand[action.value]
+                played = card.rank.name if card is not None else "NONE"
+            else:
+                played = "DECK"
             log_entry = {
                 "turn": turn,
-                "player": s.public.current_player,
+                "player": cur_idx,
                 "total_before": s.public.total,
                 "action": action.name,
-                "played_card": s.players[s.public.current_player]
-                .hand[action.value]
-                .name,
+                "played_card": played,
                 "total_after": next_s.public.total,
                 "reward": reward,
                 "done": done,
                 "direction": next_s.public.direction,
-                "penalty": next_s.public.penalty,
+                "penalty": next_s.public.penalty_level,
                 "lp_before_json": [p.lp for p in s.players],
                 "hands_before_json": [
-                    [card.name for card in p.hand] for p in s.players
+                    [c.rank.name if c is not None else "None" for c in p.hand]
+                    for p in s.players
                 ],
             }
             game_log.append(log_entry)
@@ -149,7 +161,7 @@ def collect_game_data(agent: AIAgent, num_games: int) -> list[dict]:
     return all_games_data
 
 
-def main():
+def main() -> None:
     """メイン関数：モデルをロードし、データ収集を実行して保存する。"""
     # 出力ディレクトリの作成
     OUTPUT_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -168,7 +180,8 @@ def main():
     except FileNotFoundError as e:
         logger.error("Error: %s", e)
         logger.error(
-            "Please run the training script (train_ai.py) first to generate the model file."
+            "Please run the training script (train_ai.py) first to generate the model "
+            "file."
         )
     except Exception as e:
         logger.error("An unexpected error occurred: %s", e)

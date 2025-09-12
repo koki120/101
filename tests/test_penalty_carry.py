@@ -1,7 +1,15 @@
-from one_o_one.game import State, PublicState, PlayerState, Card, Rank, Action, step
+from one_o_one.game import (
+    Action,
+    Card,
+    PlayerState,
+    PublicState,
+    Rank,
+    State,
+    step,
+)
 
 
-def test_penalty_level_preserved_on_deck_exhaustion():
+def test_penalty_level_preserved_on_deck_exhaustion() -> None:
     players = (
         PlayerState(lp=10, hand=(Card(Rank.R2), Card(Rank.R3))),
         PlayerState(lp=10, hand=(Card(Rank.R4), Card(Rank.R5))),
