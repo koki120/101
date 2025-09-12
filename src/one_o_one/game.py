@@ -232,10 +232,14 @@ class RewardScheme(NamedTuple):
 
 
 def step(
-    state: State, action: Action, reward_scheme: RewardScheme = RewardScheme()
+    state: State,
+    action: Action,
+    reward_scheme: RewardScheme | None = None,
 ) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
     s = state
     p = s.public
+    if reward_scheme is None:
+        reward_scheme = RewardScheme()
     me_idx = p.turn
     me = s.players[me_idx]
     used_card: Card | None = None

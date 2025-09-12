@@ -10,6 +10,7 @@
 """
 
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,9 @@ import torch
 import torch.nn as nn
 
 from one_o_one.game import Action, State, step
+
+
+logger = logging.getLogger(__name__)
 
 # --- 定数と設定 ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -82,9 +86,11 @@ class AIAgent:
         self.policy_net = DuelingDQN(STATE_SIZE, ACTION_SIZE).to(self.device)
 
         if not model_path.exists():
-            raise FileNotFoundError(f"学習済みモデルが見つかりません: {model_path}")
+            raise FileNotFoundError(
+                f"学習済みモデルが見つかりません: {model_path}"
+            )
 
-        print(f"Loading model from: {model_path}")
+        logger.info("Loading model from: %s", model_path)
         self.policy_net.load_state_dict(
             torch.load(model_path, map_location=self.device)
         )
@@ -105,7 +111,7 @@ def collect_game_data(agent: AIAgent, num_games: int) -> list[dict]:
     """指定された数のゲームシミュレーションを行い、ログを収集する。"""
     all_games_data = []
     for i in range(num_games):
-        print(f"Simulating game {i + 1}/{num_games}...")
+        logger.info("Simulating game %d/%d...", i + 1, num_games)
         s = State.initial()
         game_log = []
         done = False
@@ -140,7 +146,7 @@ def collect_game_data(agent: AIAgent, num_games: int) -> list[dict]:
             turn += 1
 
         all_games_data.extend(game_log)
-        print(f"Game {i + 1} finished after {turn} turns.")
+        logger.info("Game %d finished after %d turns.", i + 1, turn)
 
     return all_games_data
 
@@ -158,17 +164,20 @@ def main():
         with open(OUTPUT_DATA_PATH, "w", encoding="utf-8") as f:
             json.dump(game_data, f, indent=4)
 
-        print(f"\nSuccessfully collected and saved data for {NUM_GAMES} game(s).")
-        print(f"Data saved to: {OUTPUT_DATA_PATH}")
+        logger.info(
+            "Successfully collected and saved data for %d game(s).", NUM_GAMES
+        )
+        logger.info("Data saved to: %s", OUTPUT_DATA_PATH)
 
     except FileNotFoundError as e:
-        print(f"\nError: {e}")
-        print(
+        logger.error("Error: %s", e)
+        logger.error(
             "Please run the training script (train_ai.py) first to generate the model file."
         )
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        logger.error("An unexpected error occurred: %s", e)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()
