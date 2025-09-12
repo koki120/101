@@ -273,7 +273,10 @@ def step(
             )
             reward += reward_scheme.on_counter_prev
         next_state = _start_next_round(
-            players=tuple(new_players_list), alive=s.alive, carry_penalty_level=False
+            players=tuple(new_players_list),
+            alive=s.alive,
+            carry_penalty_level=False,
+            prev_penalty_level=p.penalty_level,
         )
         next_state = _apply_elimination(next_state)
         done, winner = _check_game_end(next_state)
@@ -343,6 +346,7 @@ def step(
             players=next_state.players,
             alive=next_state.alive,
             carry_penalty_level=False,
+            prev_penalty_level=p.penalty_level,
         )
         next_state = _apply_elimination(next_state)
         done, winner = _check_game_end(next_state)
@@ -380,13 +384,21 @@ def _start_total_from_card(card: Card) -> int:
 def _round_draw_and_continue(
     s: State, reward: float, info: dict[str, int | str | int | None]
 ) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+    """Handle the case when the deck runs out of cards.
+
+    Previously this function would call ``_start_next_round`` and then manually
+    restore the previous penalty level. This was necessary because
+    ``_start_next_round`` ignored its ``carry_penalty_level`` flag and always
+    reset the penalty to 1. After fixing ``_start_next_round`` to respect the
+    flag, we can simply forward the current penalty level and rely on it to
+    initialise the next state correctly.
+    """
+
     next_state = _start_next_round(
-        players=s.players, alive=s.alive, carry_penalty_level=True
-    )
-    # Carry over the penalty level from previous state (deck exhaustion draws)
-    prev_penalty = s.public.penalty_level
-    next_state = replace(
-        next_state, public=replace(next_state.public, penalty_level=prev_penalty)
+        players=s.players,
+        alive=s.alive,
+        carry_penalty_level=True,
+        prev_penalty_level=s.public.penalty_level,
     )
     done, winner = _check_game_end(next_state)
     info["event"] = "deck_exhausted"
@@ -395,8 +407,24 @@ def _round_draw_and_continue(
 
 
 def _start_next_round(
-    players: tuple[PlayerState, ...], alive: tuple[bool, ...], carry_penalty_level: bool
+    players: tuple[PlayerState, ...],
+    alive: tuple[bool, ...],
+    carry_penalty_level: bool,
+    prev_penalty_level: int = 1,
 ) -> State:
+    """Start a fresh round.
+
+    Args:
+        players: Current player states.
+        alive: Tuple indicating which players are still in the game.
+        carry_penalty_level: If ``True`` the previous penalty level is kept,
+            otherwise it is reset to 1.
+        prev_penalty_level: The penalty level from the previous round.
+
+    Returns:
+        A new ``State`` representing the beginning of the round.
+    """
+
     deck = _shuffle(_standard_deck(), seed=None)
     new_players_list: list[PlayerState] = []
     for i, pl in enumerate(players):
@@ -406,7 +434,9 @@ def _start_next_round(
         c1, deck = _draw_top(deck)
         c2, deck = _draw_top(deck)
         new_players_list.append(replace(pl, hand=(c1, c2)))
-    penalty_level = 1
+
+    penalty_level = prev_penalty_level if carry_penalty_level else 1
+
     public = PublicState(
         turn=_first_alive(alive),
         direction=+1,
