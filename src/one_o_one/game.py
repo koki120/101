@@ -154,6 +154,22 @@ def legal_actions(state: State) -> tuple[Action, ...]:
     return tuple(actions)
 
 
+def action_mask(state: State) -> tuple[int, ...]:
+    """Return a binary mask of legal actions.
+
+    The tuple has an entry for every action in the :class:`Action` enum.  A
+    value of ``1`` indicates that the action is currently legal for the player
+    whose turn it is, while ``0`` marks an illegal action.  This utility is
+    particularly useful when integrating the environment with reinforcement
+    learning agents that expect a fixed-size action space with masking support.
+    """
+
+    mask = [0] * len(Action)
+    for a in legal_actions(state):
+        mask[int(a)] = 1
+    return tuple(mask)
+
+
 # ==== Card effect logic ====
 
 
