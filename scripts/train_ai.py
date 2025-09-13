@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from one_o_one.game import Action, Card, State, reset, step
+from one_o_one.game import Action, Card, State, reset, step, legal_actions, action_mask
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,10 @@ EPS_END = 0.01
 EPS_DECAY = 0.995
 TARGET_UPDATE = 10  # ターゲットネットワークの更新頻度
 LEARNING_RATE = 0.001
-STATE_SIZE = 35  # 状態ベクトルのサイズ
+NUM_PLAYERS = 4
+HISTORY_LENGTH = 8
 ACTION_SIZE = 3  # アクションの数
+STATE_SIZE = 35 + (NUM_PLAYERS + ACTION_SIZE) * HISTORY_LENGTH
 
 
 # --- 状態のベクトル化 ---
@@ -68,16 +70,19 @@ def get_vector(s: State) -> np.ndarray:
     total_vec = [s.public.total / 101.0]
     dir_vec = [1.0 if s.public.direction == 1 else 0.0]
     penalty_vec = [(s.public.penalty_level - 1) / 5.0]
+    history_vec: list[float] = []
+    recent = s.public.history[-HISTORY_LENGTH:]
+    for player_idx, act in recent:
+        history_vec.extend(_to_one_hot(player_idx, NUM_PLAYERS))
+        history_vec.extend(_to_one_hot(act, ACTION_SIZE))
+    missing = HISTORY_LENGTH - len(recent)
+    history_vec.extend([0.0] * (missing * (NUM_PLAYERS + ACTION_SIZE)))
 
     state_vector = np.array(
-        hand_vec + total_vec + dir_vec + penalty_vec, dtype=np.float32
+        hand_vec + total_vec + dir_vec + penalty_vec + history_vec,
+        dtype=np.float32,
     )
-    return np.pad(
-        state_vector,
-        (0, STATE_SIZE - len(state_vector)),
-        "constant",
-        constant_values=0,
-    )
+    return state_vector
 
 
 # --- AIモデル (Dueling DQN) ---
@@ -166,14 +171,17 @@ class DQNAgent:
         self.memory = ReplayBuffer(REPLAY_BUFFER_SIZE)
         self.epsilon = EPS_START
 
-    def select_action(self, state: np.ndarray) -> Action:
-        """ε-greedy法に基づいて行動を選択する。"""
+    def select_action(self, state: State, state_vec: np.ndarray) -> Action:
+        """ε-greedy法に基づいて合法手から行動を選択する。"""
         if random.random() < self.epsilon:
-            return Action(random.randint(0, self.action_size - 1))
+            legal = legal_actions(state)
+            return random.choice(legal)
 
         with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values: torch.Tensor = self.policy_net(state_tensor)
+            state_tensor = torch.FloatTensor(state_vec).unsqueeze(0).to(self.device)
+            q_values: torch.Tensor = self.policy_net(state_tensor).squeeze(0)
+            mask = torch.tensor(action_mask(state), dtype=torch.bool, device=self.device)
+            q_values[~mask] = -1e9
             return Action(int(q_values.argmax().item()))
 
     def learn(self) -> None:
@@ -237,7 +245,7 @@ def main() -> None:
 
         while not done:
             state_vec = get_vector(s)
-            action = agent.select_action(state_vec)
+            action = agent.select_action(s, state_vec)
 
             next_s, reward, done, _ = step(s, action)
             next_state_vec = get_vector(next_s)
