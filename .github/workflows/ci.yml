@@ -5,27 +5,26 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PYENV_VERSION: "3.11.12"
+      PYTHONPATH: src
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Ryeのセットアップと依存関係のキャッシュを有効化
-      - name: Set up Rye
-        uses: eifinger/setup-rye@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
-      - name: Install dependencies
-        run: rye sync
-
       - name: Run formatter check
-        run: rye fmt --check
+        run: uv run --no-project ruff format --check .
 
       - name: Run linter
-        run: rye lint
+        run: uv run --no-project ruff check .
 
       - name: Run type checker
-        run: rye run mypy .
+        run: uv run mypy .
 
       - name: Run tests
-        run: rye test
+        run: uv run --no-project pytest -q
