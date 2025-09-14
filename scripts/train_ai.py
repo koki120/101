@@ -1,8 +1,7 @@
 """
 カードゲーム「101」のAIエージェントを強化学習で訓練するスクリプト。
 
-Dueling Double Deep Q-Network (D3QN) を使用し、
-自己対戦を通じてゲームの最適戦略を学習します。
+Transformer ベースのモデルを用いて自己対戦から最適戦略を学習します。
 
 学習データは以下のディレクトリに保存されます:
 - エピソードデータ: <プロジェクトルート>/data/episodes/
@@ -14,7 +13,6 @@ Dueling Double Deep Q-Network (D3QN) を使用し、
 import logging
 import random
 import warnings
-from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -38,12 +36,9 @@ MODEL_SAVE_DIR = PROJECT_ROOT / "models"
 # 訓練パラメータ
 NUM_EPISODES = 700  # 訓練エピソード数
 REPLAY_BUFFER_SIZE = 10000  # リプレイバッファのサイズ
-BATCH_SIZE = 128
-GAMMA = 0.99  # 割引率
 EPS_START = 1.0  # ε-greedy法の開始ε
 EPS_END = 0.01
 EPS_DECAY = 0.995
-TARGET_UPDATE = 10  # ターゲットネットワークの更新頻度
 LEARNING_RATE = 0.001
 NUM_PLAYERS = 4
 HISTORY_LENGTH = 8
@@ -63,8 +58,8 @@ def _rank_value(card: Card | None) -> int:
     return int(card.rank) if card is not None else 0
 
 
-def get_vector(s: State) -> np.ndarray:
-    """ゲーム状態をAIの入力となる固定長のベクトルに変換する。"""
+def encode_state(s: State) -> np.ndarray:
+    """単一のゲーム状態をベクトルに変換する。"""
     me = s.players[s.public.turn]
     hand_vec = _to_one_hot(_rank_value(me.hand[0]), 16) + _to_one_hot(
         _rank_value(me.hand[1]), 16
@@ -87,76 +82,57 @@ def get_vector(s: State) -> np.ndarray:
     return state_vector
 
 
-# --- AIモデル (Dueling DQN) ---
+def get_vector(
+    states: list[State], actions: list[int], rewards: list[float]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """ゲーム開始からの状態・行動・報酬のシーケンスを返す。"""
+    state_vecs = [encode_state(st) for st in states]
+    action_seq = actions + [0]
+    reward_seq = rewards + [0.0]
+    return (
+        np.array(state_vecs, dtype=np.float32),
+        np.array(action_seq, dtype=np.int64),
+        np.array(reward_seq, dtype=np.float32),
+    )
 
 
-class DuelingDQN(nn.Module):
-    """Dueling Networkアーキテクチャを持つDQNモデル。"""
+# --- Transformerベースのモデル ---
 
-    def __init__(self, state_size: int, action_size: int):
+
+class DecisionTransformer(nn.Module):
+    """状態・行動・報酬の系列から次の行動を予測するTransformerモデル。"""
+
+    def __init__(self, state_size: int, action_size: int, hidden_size: int = 128):
         super().__init__()
-        self.feature_layer = nn.Sequential(nn.Linear(state_size, 128), nn.ReLU())
-        self.advantage_stream = nn.Sequential(
-            nn.Linear(128, 128), nn.ReLU(), nn.Linear(128, action_size)
-        )
-        self.value_stream = nn.Sequential(
-            nn.Linear(128, 128), nn.ReLU(), nn.Linear(128, 1)
-        )
+        self.state_embed = nn.Linear(state_size, hidden_size)
+        self.action_embed = nn.Embedding(action_size, hidden_size)
+        self.reward_embed = nn.Linear(1, hidden_size)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=8)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.predict_head = nn.Linear(hidden_size, action_size)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        features: torch.Tensor = self.feature_layer(x)
-        advantages: torch.Tensor = self.advantage_stream(features)
-        values: torch.Tensor = self.value_stream(features)
-        qvals: torch.Tensor = values + (
-            advantages - advantages.mean(dim=1, keepdim=True)
-        )
-        return qvals
-
-
-# --- リプレイバッファ ---
-
-
-class ReplayBuffer:
-    """経験を保存し、ランダムサンプリングするためのバッファ。"""
-
-    def __init__(self, capacity: int):
-        self.buffer: deque[tuple[np.ndarray, int, float, np.ndarray, bool]] = deque(
-            maxlen=capacity
-        )
-
-    def push(
+    def forward(
         self,
-        state: np.ndarray,
-        action: int,
-        reward: float,
-        next_state: np.ndarray,
-        done: bool,
-    ) -> None:
-        self.buffer.append((state, action, reward, next_state, done))
-
-    def sample(
-        self, batch_size: int
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        states, actions, rewards, next_states, dones = zip(
-            *random.sample(self.buffer, batch_size), strict=False
-        )
-        return (
-            np.array(states),
-            np.array(actions),
-            np.array(rewards, dtype=np.float32),
-            np.array(next_states),
-            np.array(dones, dtype=np.uint8),
-        )
-
-    def __len__(self) -> int:
-        return len(self.buffer)
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+    ) -> torch.Tensor:
+        """各時刻の状態・行動・報酬から次の行動のロジットを計算する。"""
+        state_tokens = self.state_embed(states)
+        action_tokens = self.action_embed(actions)
+        reward_tokens = self.reward_embed(rewards.unsqueeze(-1))
+        tokens = state_tokens + action_tokens + reward_tokens
+        tokens = tokens.unsqueeze(1)  # (T, 1, hidden)
+        out = self.encoder(tokens)
+        logits: torch.Tensor = self.predict_head(out.squeeze(1))
+        return logits
 
 
 # --- AIエージェント ---
 
 
-class DQNAgent:
-    """DQNアルゴリズムを実装したエージェント。"""
+class TransformerAgent:
+    """DecisionTransformer を用いたエージェント。"""
 
     def __init__(self, state_size: int, action_size: int):
         self.state_size = state_size
@@ -164,57 +140,57 @@ class DQNAgent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info("Using device: %s", self.device)
 
-        self.policy_net = DuelingDQN(state_size, action_size).to(self.device)
-        self.target_net = DuelingDQN(state_size, action_size).to(self.device)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.target_net.eval()
-
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LEARNING_RATE)
-        self.memory = ReplayBuffer(REPLAY_BUFFER_SIZE)
+        self.model = DecisionTransformer(state_size, action_size).to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
         self.epsilon = EPS_START
+        self.memory: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
 
-    def select_action(self, state: State, state_vec: np.ndarray) -> Action:
+    def select_action(
+        self,
+        state: State,
+        state_seq: np.ndarray,
+        action_seq: np.ndarray,
+        reward_seq: np.ndarray,
+    ) -> Action:
         """ε-greedy法に基づいて合法手から行動を選択する。"""
         if random.random() < self.epsilon:
             legal = legal_actions(state)
             return random.choice(legal)
 
         with torch.no_grad():
-            state_tensor = torch.FloatTensor(state_vec).unsqueeze(0).to(self.device)
-            q_values: torch.Tensor = self.policy_net(state_tensor).squeeze(0)
+            states_t = torch.FloatTensor(state_seq).to(self.device)
+            actions_t = torch.LongTensor(action_seq).to(self.device)
+            rewards_t = torch.FloatTensor(reward_seq).to(self.device)
+            logits: torch.Tensor = self.model(states_t, actions_t, rewards_t)[-1]
             mask = torch.tensor(
                 action_mask(state), dtype=torch.bool, device=self.device
             )
-            q_values[~mask] = -1e9
-            return Action(int(q_values.argmax().item()))
+            logits[~mask] = -1e9
+            return Action(int(logits.argmax().item()))
+
+    def store_episode(
+        self,
+        state_seq: np.ndarray,
+        action_seq: np.ndarray,
+        reward_seq: np.ndarray,
+    ) -> None:
+        self.memory.append((state_seq, action_seq, reward_seq))
+        if len(self.memory) > REPLAY_BUFFER_SIZE:
+            self.memory.pop(0)
 
     def learn(self) -> None:
-        """リプレイバッファからの経験を用いてネットワークを更新する。"""
-        if len(self.memory) < BATCH_SIZE:
+        """軌跡データを用いてモデルを更新する。"""
+        if not self.memory:
             return
-
-        states, actions, rewards, next_states, dones = self.memory.sample(BATCH_SIZE)
-
+        states, actions, rewards = random.choice(self.memory)
         states_t = torch.FloatTensor(states).to(self.device)
-        actions_t = torch.LongTensor(actions).unsqueeze(-1).to(self.device)
-        rewards_t = torch.FloatTensor(rewards).unsqueeze(-1).to(self.device)
-        next_states_t = torch.FloatTensor(next_states).to(self.device)
-        dones_t = torch.ByteTensor(dones).unsqueeze(-1).to(self.device)
-
-        # Double DQN
-        with torch.no_grad():
-            best_actions = self.policy_net(next_states_t).argmax(1).unsqueeze(-1)
-            next_q_values = self.target_net(next_states_t).gather(1, best_actions)
-
-        target_q_values = rewards_t + (GAMMA * next_q_values * (1 - dones_t))
-
-        current_q_values = self.policy_net(states_t).gather(1, actions_t)
-
-        loss: torch.Tensor = nn.functional.smooth_l1_loss(
-            current_q_values, target_q_values
-        )
-
+        actions_t = torch.LongTensor(actions).to(self.device)
+        rewards_t = torch.FloatTensor(rewards).to(self.device)
+        logits = self.model(states_t, actions_t, rewards_t)[:-1]
+        loss: torch.Tensor = nn.functional.cross_entropy(logits, actions_t[1:])
         self.optimizer.zero_grad()
+        # PyTorch の Tensor.backward は型ヒントが提供されていないため
+        # 明示的に torch.autograd.backward を使用して勾配を計算する。
         torch.autograd.backward(loss)
         self.optimizer.step()
 
@@ -232,12 +208,11 @@ def main() -> None:
     EPISODE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
-    agent = DQNAgent(STATE_SIZE, ACTION_SIZE)
-    model_path = MODEL_SAVE_DIR / "101_d3qn.pth"
+    agent = TransformerAgent(STATE_SIZE, ACTION_SIZE)
+    model_path = MODEL_SAVE_DIR / "101_transformer.pth"
     if model_path.exists():
         logger.info("Loading model from %s", model_path)
-        agent.policy_net.load_state_dict(torch.load(model_path))
-        agent.target_net.load_state_dict(agent.policy_net.state_dict())
+        agent.model.load_state_dict(torch.load(model_path))
 
     all_episode_data = []
 
@@ -246,26 +221,33 @@ def main() -> None:
         episode_reward = 0.0
         episode_data: list[dict[str, object]] = []
         done = False
+        state_history: list[State] = []
+        action_history: list[int] = []
+        reward_history: list[float] = []
 
         while not done:
-            state_vec = get_vector(s)
-            action = agent.select_action(s, state_vec)
+            state_history.append(s)
+            state_seq, action_seq, reward_seq = get_vector(
+                state_history, action_history, reward_history
+            )
+            action = agent.select_action(s, state_seq, action_seq, reward_seq)
 
             next_s, reward, done, _ = step(s, action)
-            next_state_vec = get_vector(next_s)
-
-            agent.memory.push(state_vec, action.value, reward, next_state_vec, done)
-            agent.learn()
+            action_history.append(action.value)
+            reward_history.append(reward)
 
             episode_reward += reward
-            episode_data.append({"state": state_vec, "action": action.value})
+            episode_data.append({"state": encode_state(s), "action": action.value})
             s = next_s
 
+        state_history.append(s)
+        state_seq, action_seq, reward_seq = get_vector(
+            state_history, action_history, reward_history
+        )
+        agent.store_episode(state_seq, action_seq, reward_seq)
+        agent.learn()
         all_episode_data.extend(episode_data)
         agent.update_epsilon()
-
-        if episode % TARGET_UPDATE == 0:
-            agent.target_net.load_state_dict(agent.policy_net.state_dict())
 
         if episode % 100 == 0:
             logger.info(
@@ -275,7 +257,7 @@ def main() -> None:
                 agent.epsilon,
             )
             # モデルを保存
-            torch.save(agent.policy_net.state_dict(), model_path)
+            torch.save(agent.model.state_dict(), model_path)
 
             # エピソードデータをParquet形式で保存
             df = pd.DataFrame(all_episode_data)
@@ -283,7 +265,7 @@ def main() -> None:
             all_episode_data = []
 
     logger.info("Training finished.")
-    torch.save(agent.policy_net.state_dict(), model_path)
+    torch.save(agent.model.state_dict(), model_path)
     logger.info("Final model saved to %s", model_path)
 
 
