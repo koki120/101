@@ -9,6 +9,8 @@ Dueling Double Deep Q-Network (D3QN) を使用し、
 - モデルの重み: <プロジェクトルート>/models/
 """
 
+# mypy: disallow-subclassing-any=False
+
 import logging
 import random
 import warnings
@@ -88,7 +90,7 @@ def get_vector(s: State) -> np.ndarray:
 # --- AIモデル (Dueling DQN) ---
 
 
-class DuelingDQN(nn.Module):  # type: ignore[misc]
+class DuelingDQN(nn.Module):
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):

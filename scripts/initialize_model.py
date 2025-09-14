@@ -7,6 +7,8 @@ AIモデルが存在しない場合に、初期状態のモデルファイルを
 `collect_data.py`を学習済みモデルなしで実行したい場合に便利です。
 """
 
+# mypy: disallow-subclassing-any=False
+
 import logging
 from pathlib import Path
 
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 # --- AIモデル定義 (train_ai.pyから流用) ---
-class DuelingDQN(nn.Module):  # type: ignore[misc]
+class DuelingDQN(nn.Module):
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):
