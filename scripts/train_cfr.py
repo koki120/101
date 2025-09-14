@@ -22,7 +22,7 @@ import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -124,10 +124,10 @@ class StrategyMemory(ReservoirMemory):
 # ---------------------------------------------------------------------------
 
 
-class AdvantageNetwork(nn.Module):  # type: ignore[misc]
+class AdvantageNetwork(nn.Module):
     def __init__(self, state_size: int, action_size: int, hidden: int = 128):
         super().__init__()
-        self.net = nn.Sequential(
+        self.net: nn.Sequential = nn.Sequential(
             nn.Linear(state_size, hidden),
             nn.ReLU(),
             nn.Linear(hidden, hidden),
@@ -136,13 +136,13 @@ class AdvantageNetwork(nn.Module):  # type: ignore[misc]
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+        return cast(torch.Tensor, self.net(x))
 
 
-class StrategyNetwork(nn.Module):  # type: ignore[misc]
+class StrategyNetwork(nn.Module):
     def __init__(self, state_size: int, action_size: int, hidden: int = 128):
         super().__init__()
-        self.net = nn.Sequential(
+        self.net: nn.Sequential = nn.Sequential(
             nn.Linear(state_size, hidden),
             nn.ReLU(),
             nn.Linear(hidden, hidden),
@@ -151,7 +151,7 @@ class StrategyNetwork(nn.Module):  # type: ignore[misc]
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+        return cast(torch.Tensor, self.net(x))
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ class DeepCFR:
             output = self.adv_net(states)
             pred = output.gather(1, actions.unsqueeze(1)).squeeze(1)
             loss = torch.mean((pred - regrets) ** 2)
-            loss.backward()
+            loss.backward()  # type: ignore[no-untyped-call]
             self.adv_optimizer.step()
 
     def _train_strategy(self, epochs: int = 1) -> None:
@@ -258,7 +258,7 @@ class DeepCFR:
             logits = self.strat_net(states)
             log_probs = torch.log_softmax(logits, dim=-1)
             loss = -(target * log_probs).sum(dim=-1).mean()
-            loss.backward()
+            loss.backward()  # type: ignore[no-untyped-call]
             self.strat_optimizer.step()
 
     # ------------------------------------------------------------------
