@@ -22,22 +22,14 @@ import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from one_o_one.game import (
-    Action,
-    Card,
-    State,
-    action_mask,
-    legal_actions,
-    reset,
-    step,
-)
+from one_o_one.game import Action, Card, State, action_mask, reset, step
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +53,7 @@ BATCH_SIZE = 64
 # ---------------------------------------------------------------------------
 
 
-def _to_one_hot(num: int, max_val: int) -> List[float]:
+def _to_one_hot(num: int, max_val: int) -> list[float]:
     return [1.0 if i == num else 0.0 for i in range(max_val)]
 
 
@@ -77,7 +69,7 @@ def encode_state(s: State) -> np.ndarray:
     total_vec = [s.public.total / 101.0]
     dir_vec = [1.0 if s.public.direction == 1 else 0.0]
     penalty_vec = [(s.public.penalty_level - 1) / 5.0]
-    history_vec: List[float] = []
+    history_vec: list[float] = []
     recent = s.public.history[-HISTORY_LENGTH:]
     for player_idx, act in recent:
         history_vec.extend(_to_one_hot(player_idx, NUM_PLAYERS))
@@ -101,10 +93,10 @@ class ReservoirMemory:
 
     def __init__(self, capacity: int):
         self.capacity = capacity
-        self.data: List[Tuple] = []
+        self.data: list[tuple[Any, ...]] = []
         self.n_seen = 0
 
-    def add(self, item: Tuple) -> None:
+    def add(self, item: tuple[Any, ...]) -> None:
         self.n_seen += 1
         if len(self.data) < self.capacity:
             self.data.append(item)
@@ -113,7 +105,7 @@ class ReservoirMemory:
             if idx < self.capacity:
                 self.data[idx] = item
 
-    def sample(self, batch_size: int) -> List[Tuple]:
+    def sample(self, batch_size: int) -> list[tuple[Any, ...]]:
         if not self.data:
             return []
         return random.sample(self.data, min(batch_size, len(self.data)))
@@ -132,7 +124,7 @@ class StrategyMemory(ReservoirMemory):
 # ---------------------------------------------------------------------------
 
 
-class AdvantageNetwork(nn.Module):
+class AdvantageNetwork(nn.Module):  # type: ignore[misc]
     def __init__(self, state_size: int, action_size: int, hidden: int = 128):
         super().__init__()
         self.net = nn.Sequential(
@@ -147,7 +139,7 @@ class AdvantageNetwork(nn.Module):
         return self.net(x)
 
 
-class StrategyNetwork(nn.Module):
+class StrategyNetwork(nn.Module):  # type: ignore[misc]
     def __init__(self, state_size: int, action_size: int, hidden: int = 128):
         super().__init__()
         self.net = nn.Sequential(
@@ -177,8 +169,12 @@ class DeepCFR:
 
     def __post_init__(self) -> None:
         logger.info("Using device: %s", self.device)
-        self.adv_net = AdvantageNetwork(self.state_size, self.action_size).to(self.device)
-        self.strat_net = StrategyNetwork(self.state_size, self.action_size).to(self.device)
+        self.adv_net = AdvantageNetwork(self.state_size, self.action_size).to(
+            self.device
+        )
+        self.strat_net = StrategyNetwork(self.state_size, self.action_size).to(
+            self.device
+        )
         self.adv_optimizer = optim.Adam(self.adv_net.parameters(), lr=LEARNING_RATE)
         self.strat_optimizer = optim.Adam(self.strat_net.parameters(), lr=LEARNING_RATE)
         self.adv_memory = AdvantageMemory(MEMORY_CAPACITY)
@@ -188,7 +184,7 @@ class DeepCFR:
     # Self-play and data collection
     # ------------------------------------------------------------------
 
-    def _policy(self, state: State) -> Tuple[Action, np.ndarray]:
+    def _policy(self, state: State) -> tuple[Action, np.ndarray]:
         """Sample an action from the current strategy network."""
         state_vec = torch.tensor(encode_state(state), device=self.device)
         logits = self.strat_net(state_vec)
@@ -202,7 +198,7 @@ class DeepCFR:
     def play_game(self) -> None:
         """Run one episode of self-play collecting regret and strategy data."""
         state = reset(NUM_PLAYERS)
-        trajectory: List[Tuple[np.ndarray, int, np.ndarray]] = []
+        trajectory: list[tuple[np.ndarray, int, np.ndarray]] = []
         while True:
             action, strat = self._policy(state)
             state_vec = encode_state(state)
@@ -227,7 +223,9 @@ class DeepCFR:
     def _train_advantage(self, epochs: int = 1) -> None:
         if not self.adv_memory.data:
             return
-        self.adv_net = AdvantageNetwork(self.state_size, self.action_size).to(self.device)
+        self.adv_net = AdvantageNetwork(self.state_size, self.action_size).to(
+            self.device
+        )
         self.adv_optimizer = optim.Adam(self.adv_net.parameters(), lr=LEARNING_RATE)
         for _ in range(epochs):
             batch = self.adv_memory.sample(BATCH_SIZE)
@@ -246,7 +244,9 @@ class DeepCFR:
     def _train_strategy(self, epochs: int = 1) -> None:
         if not self.strat_memory.data:
             return
-        self.strat_net = StrategyNetwork(self.state_size, self.action_size).to(self.device)
+        self.strat_net = StrategyNetwork(self.state_size, self.action_size).to(
+            self.device
+        )
         self.strat_optimizer = optim.Adam(self.strat_net.parameters(), lr=LEARNING_RATE)
         for _ in range(epochs):
             batch = self.strat_memory.sample(BATCH_SIZE)
