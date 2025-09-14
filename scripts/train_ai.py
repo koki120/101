@@ -1,8 +1,7 @@
 """
 カードゲーム「101」のAIエージェントを強化学習で訓練するスクリプト。
 
-Dueling Double Deep Q-Network (D3QN) を使用し、
-自己対戦を通じてゲームの最適戦略を学習します。
+Transformer ベースのモデルを用いて自己対戦から最適戦略を学習します。
 
 学習データは以下のディレクトリに保存されます:
 - エピソードデータ: <プロジェクトルート>/data/episodes/
@@ -37,12 +36,9 @@ MODEL_SAVE_DIR = PROJECT_ROOT / "models"
 # 訓練パラメータ
 NUM_EPISODES = 700  # 訓練エピソード数
 REPLAY_BUFFER_SIZE = 10000  # リプレイバッファのサイズ
-BATCH_SIZE = 128
-GAMMA = 0.99  # 割引率
 EPS_START = 1.0  # ε-greedy法の開始ε
 EPS_END = 0.01
 EPS_DECAY = 0.995
-TARGET_UPDATE = 10  # ターゲットネットワークの更新頻度
 LEARNING_RATE = 0.001
 NUM_PLAYERS = 4
 HISTORY_LENGTH = 8
@@ -166,7 +162,9 @@ class TransformerAgent:
             actions_t = torch.LongTensor(action_seq).to(self.device)
             rewards_t = torch.FloatTensor(reward_seq).to(self.device)
             logits: torch.Tensor = self.model(states_t, actions_t, rewards_t)[-1]
-            mask = torch.tensor(action_mask(state), dtype=torch.bool, device=self.device)
+            mask = torch.tensor(
+                action_mask(state), dtype=torch.bool, device=self.device
+            )
             logits[~mask] = -1e9
             return Action(int(logits.argmax().item()))
 
@@ -184,7 +182,7 @@ class TransformerAgent:
         """軌跡データを用いてモデルを更新する。"""
         if not self.memory:
             return
-        states, actions, rewards = self.memory.pop(0)
+        states, actions, rewards = random.choice(self.memory)
         states_t = torch.FloatTensor(states).to(self.device)
         actions_t = torch.LongTensor(actions).to(self.device)
         rewards_t = torch.FloatTensor(rewards).to(self.device)
