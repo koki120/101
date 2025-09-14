@@ -12,22 +12,18 @@ dependencies = [
     "pyarrow>=21.0.0",
 ]
 readme = "README.md"
-requires-python = ">= 3.8"
+requires-python = ">= 3.11"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.rye]
-managed = true
+[tool.uv]
 dev-dependencies = [
     "ruff>=0.13.0",
     "mypy>=1.18.1",
     "pytest>=8.4.2",
 ]
-
-[tool.rye.scripts]
-mypy = "mypy"
 
 [tool.hatch.metadata]
 allow-direct-references = true

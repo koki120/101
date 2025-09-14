@@ -16,23 +16,26 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PYENV_VERSION: "3.11.12"
+      PYTHONPATH: src
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Rye
-        uses: eifinger/setup-rye@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
       - name: Install dependencies
-        run: rye sync
+        run: uv sync
 
       - name: Generate game data
-        run: rye run python scripts/collect_data.py
+        run: uv run python scripts/collect_data.py
 
       - name: Generate replay HTML
-        run: rye run python scripts/spectate.py
+        run: uv run python scripts/spectate.py
 
       - name: Prepare artifact
         run: |
@@ -55,3 +58,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
