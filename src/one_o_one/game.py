@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from typing import NamedTuple
 

@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from one_o_one.game import Action, Card, State, reset, step, legal_actions, action_mask
+from one_o_one.game import Action, Card, State, action_mask, legal_actions, reset, step
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def get_vector(s: State) -> np.ndarray:
 # --- AIモデル (Dueling DQN) ---
 
 
-class DuelingDQN(nn.Module):
+class DuelingDQN(nn.Module):  # type: ignore[misc]
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):

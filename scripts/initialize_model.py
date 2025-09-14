@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # --- AIモデル定義 (train_ai.pyから流用) ---
-class DuelingDQN(nn.Module):
+class DuelingDQN(nn.Module):  # type: ignore[misc]
     """Dueling Networkアーキテクチャを持つDQNモデル。"""
 
     def __init__(self, state_size: int, action_size: int):
