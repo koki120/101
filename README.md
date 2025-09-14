@@ -5,7 +5,7 @@
 まず、AIエージェントを学習させ、モデルファイルを作成します。この処理は完了までに時間がかかることがあります。
 
 ```bash
-rye run python scripts/train_ai.py
+uv run python scripts/train_ai.py
 ```
 
 実行が始まると、ターミナルに以下のような進捗状況が表示されます。
@@ -28,7 +28,7 @@ Episode 100, Total Reward: -1.0, Epsilon: 0.6017
 **（注意：このコマンドは、ステップ1が完了し、`models/101_d3qn.pth`が作成された後に実行してください。）**
 
 ```bash
-rye run python scripts/collect_data.py
+uv run python scripts/collect_data.py
 ```
 
 成功すると、以下のメッセージが表示され、`data/game_data_for_spectate.json`ファイルが作成されます。
@@ -51,7 +51,7 @@ Data saved to: <...>/101-ai-project/data/game_data_for_spectate.json
 **（注意：このコマンドは、ステップ2が完了し、`data/game_data_for_spectate.json`が作成された後に実行してください。）**
 
 ```bash
-rye run python scripts/spectate.py
+uv run python scripts/spectate.py
 ```
 
 実行すると、ターミナルに完了メッセージが表示され、自動的にデフォルトのWebブラウザが起動して`game_replay.html`が開き、対戦アニメーションが始まります。
@@ -64,10 +64,10 @@ rye run python scripts/spectate.py
 
 ## テストの実行
 
-作成したテストコード（`tests/test_game.py`）を実行するには、`rye test`コマンドを使用します。
+作成したテストコード（`tests/test_game.py`）を実行するには、`uv run pytest`コマンドを使用します。
 
 ```bash
-rye test
+uv run pytest
 ```
 
 すべてのテストがパスすれば、ゲームのコアロジックが正しく実装されていることを確認できます。
