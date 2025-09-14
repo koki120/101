@@ -18,10 +18,10 @@ jobs:
           enable-cache: true
 
       - name: Run formatter check
-        run: uv run --no-project ruff format --check .
+        run: uvx ruff format --check .
 
       - name: Run linter
-        run: uv run --no-project ruff check .
+        run: uvx ruff check .
 
       - name: Run type checker
         run: uv run mypy .
