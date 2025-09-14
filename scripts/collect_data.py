@@ -9,6 +9,8 @@
 - データ保存先: <プロジェクトルート>/data/game_data_for_spectate.json
 """
 
+# mypy: disallow-subclassing-any=False
+
 import json
 import logging
 from pathlib import Path

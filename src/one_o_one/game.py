@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from typing import NamedTuple
 
@@ -50,6 +50,7 @@ class PublicState:
     deck: tuple[Card, ...]
     discard: tuple[Card, ...]
     last_player: int | None
+    history: tuple[tuple[int, int], ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,7 @@ def reset(
         deck=deck,
         discard=tuple(),
         last_player=None,
+        history=tuple(),
     )
     alive = tuple(True for _ in range(num_players))
     return State(players=tuple(players), public=public, alive=alive)
@@ -275,6 +277,7 @@ def step(
     eff = _apply_card_effect(p.total, p.direction, used_card)
     reward: float = reward_scheme.step_penalty
     info: dict[str, int | str | int | None] = {"used_card": int(used_card.rank)}
+    new_history = s.public.history + ((me_idx, int(action)),)
     # Joker counter effect
     if eff.counter_triggered:
         new_players_list = list(s.players)
@@ -324,6 +327,7 @@ def step(
             deck=after_deck,
             discard=p.discard + (used_card,),
             last_player=me_idx,
+            history=tuple(),
         )
         next_state = replace(s, players=tuple(new_players), public=new_public)
         info["event"] = "reset"
@@ -350,6 +354,7 @@ def step(
         deck=new_deck,
         discard=p.discard + (used_card,),
         last_player=me_idx,
+        history=new_history,
     )
     next_state = replace(s, players=tuple(new_players), public=new_public)
     if burst:
@@ -452,6 +457,7 @@ def _start_next_round(
         deck=deck,
         discard=tuple(),
         last_player=None,
+        history=tuple(),
     )
     return State(players=tuple(new_players_list), public=public, alive=alive)
 

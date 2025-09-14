@@ -7,6 +7,8 @@ AIモデルが存在しない場合に、初期状態のモデルファイルを
 `collect_data.py`を学習済みモデルなしで実行したい場合に便利です。
 """
 
+# mypy: disallow-subclassing-any=False
+
 import logging
 from pathlib import Path
 
