@@ -180,7 +180,9 @@ class DQNAgent:
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state_vec).unsqueeze(0).to(self.device)
             q_values: torch.Tensor = self.policy_net(state_tensor).squeeze(0)
-            mask = torch.tensor(action_mask(state), dtype=torch.bool, device=self.device)
+            mask = torch.tensor(
+                action_mask(state), dtype=torch.bool, device=self.device
+            )
             q_values[~mask] = -1e9
             return Action(int(q_values.argmax().item()))
 
