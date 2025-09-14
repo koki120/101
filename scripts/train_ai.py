@@ -189,7 +189,9 @@ class TransformerAgent:
         logits = self.model(states_t, actions_t, rewards_t)[:-1]
         loss: torch.Tensor = nn.functional.cross_entropy(logits, actions_t[1:])
         self.optimizer.zero_grad()
-        loss.backward()
+        # PyTorch の Tensor.backward は型ヒントが提供されていないため
+        # 明示的に torch.autograd.backward を使用して勾配を計算する。
+        torch.autograd.backward(loss)
         self.optimizer.step()
 
     def update_epsilon(self) -> None:
