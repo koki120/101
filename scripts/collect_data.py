@@ -168,14 +168,25 @@ class AIAgent:
                 state_dict = loaded["policy_net"]
             else:
                 state_dict = loaded
-        elif hasattr(loaded, "state_dict"):
-            state_dict = loaded.state_dict()
-        elif hasattr(loaded, "model") and hasattr(loaded.model, "state_dict"):
-            state_dict = loaded.model.state_dict()
-        elif hasattr(loaded, "policy_net") and hasattr(loaded.policy_net, "state_dict"):
-            state_dict = loaded.policy_net.state_dict()
         else:
-            raise AttributeError("Loaded object does not contain a state_dict")
+            # Try typical attributes in priority order, guarding against
+            # partially-saved agent objects whose ``state_dict`` may raise if
+            # submodules like ``policy_net`` are missing.
+            state_dict = None
+            for obj in (
+                getattr(loaded, "model", None),
+                getattr(loaded, "policy_net", None),
+                loaded,
+            ):
+                if obj is None:
+                    continue
+                try:
+                    state_dict = obj.state_dict()
+                    break
+                except Exception:
+                    continue
+            if state_dict is None:
+                raise AttributeError("Loaded object does not contain a state_dict")
 
         self.model.load_state_dict(state_dict)
         self.model.eval()
