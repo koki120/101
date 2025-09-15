@@ -33,7 +33,8 @@ NUM_GAMES = 1  # 生成するゲーム数
 NUM_PLAYERS = 4
 HISTORY_LENGTH = 8
 ACTION_SIZE = 3
-STATE_SIZE = 35 + (NUM_PLAYERS + ACTION_SIZE) * HISTORY_LENGTH
+# Opponent hand prediction adds 32 values per opponent (2 cards * 16 ranks)
+STATE_SIZE = 35 + (NUM_PLAYERS + ACTION_SIZE) * HISTORY_LENGTH + (NUM_PLAYERS - 1) * 32
 
 
 # --- AIモデルと状態ベクトル化関数 (train_ai.pyから再利用) ---
@@ -82,8 +83,14 @@ def encode_state(s: State) -> np.ndarray:
     missing = HISTORY_LENGTH - len(recent)
     history_vec.extend([0.0] * (missing * (NUM_PLAYERS + ACTION_SIZE)))
 
+    # During training the model also receives opponent hand predictions.
+    # These weights are not available when running this script, so we pad
+    # the state vector with zeros for these features to match the expected
+    # dimensionality.
+    opponent_pred = [0.0] * ((NUM_PLAYERS - 1) * 32)
+
     state_vector = np.array(
-        hand_vec + total_vec + dir_vec + penalty_vec + history_vec,
+        hand_vec + total_vec + dir_vec + penalty_vec + history_vec + opponent_pred,
         dtype=np.float32,
     )
     return state_vector
@@ -144,7 +151,8 @@ class AIAgent:
 
         logger.info("Loading model from: %s", model_path)
         state_dict = torch.load(model_path, map_location=self.device)
-        self.policy_net.load_state_dict(state_dict)
+        self.model.load_state_dict(state_dict)
+        self.model.eval()
 
     def select_action(
         self,
