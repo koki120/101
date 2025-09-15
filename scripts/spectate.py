@@ -135,9 +135,12 @@ HTML_TEMPLATE = """
         const totalDisplay = document.getElementById('total-display');
         const penaltyDisplay = document.getElementById('penalty-display');
         const eventDisplay = document.getElementById('event-display');
+        // プレイヤー領域の取得
+        // Array.from にオブジェクトを渡すと空配列となるため、
+        // プレイヤー数に応じて DOM 要素を確実に取得する
         const playerAreas = Array.from(
-            {{0: 'p0', 1: 'p1', 2: 'p2', 3: 'p3'}},
-            ([_, v]) => document.getElementById(v)
+            {{ length: NUM_PLAYERS }},
+            (_, i) => document.getElementById(`p${{i}}`)
         );
 
         let currentTurn = 0;
