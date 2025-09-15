@@ -15,9 +15,15 @@ from pathlib import Path
 from typing import TypedDict
 
 import torch
+from train_cfr import (
+    ACTION_SIZE,
+    NUM_PLAYERS,
+    STATE_SIZE,
+    StrategyNetwork,
+    encode_state,
+)
 
 from one_o_one.game import Action, State, action_mask, reset, step
-from train_cfr import ACTION_SIZE, NUM_PLAYERS, STATE_SIZE, StrategyNetwork, encode_state
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +69,9 @@ class CFRPolicyAgent:
         with torch.no_grad():
             state_vec = torch.tensor(encode_state(state), device=self.device)
             logits = self.model(state_vec)
-            mask = torch.tensor(action_mask(state), dtype=torch.bool, device=self.device)
+            mask = torch.tensor(
+                action_mask(state), dtype=torch.bool, device=self.device
+            )
             logits[~mask] = -1e9
             return Action(int(logits.argmax().item()))
 
