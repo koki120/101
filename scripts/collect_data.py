@@ -150,7 +150,33 @@ class AIAgent:
             raise FileNotFoundError(f"学習済みモデルが見つかりません: {model_path}")
 
         logger.info("Loading model from: %s", model_path)
-        state_dict = torch.load(model_path, map_location=self.device)
+
+        loaded = torch.load(model_path, map_location=self.device)
+
+        # Support a variety of saved formats.  Some historical training scripts
+        # stored the entire agent object (with attributes like ``policy_net``),
+        # while newer versions save just the model's ``state_dict``.  To keep
+        # this data-collection utility robust, attempt to extract a state
+        # dictionary from whatever object was loaded.
+        if isinstance(loaded, dict):
+            # Common case: the raw ``state_dict`` or wrapped in a dictionary.
+            if "model_state_dict" in loaded:
+                state_dict = loaded["model_state_dict"]
+            elif "state_dict" in loaded:
+                state_dict = loaded["state_dict"]
+            elif "policy_net" in loaded and isinstance(loaded["policy_net"], dict):
+                state_dict = loaded["policy_net"]
+            else:
+                state_dict = loaded
+        elif hasattr(loaded, "state_dict"):
+            state_dict = loaded.state_dict()
+        elif hasattr(loaded, "model") and hasattr(loaded.model, "state_dict"):
+            state_dict = loaded.model.state_dict()
+        elif hasattr(loaded, "policy_net") and hasattr(loaded.policy_net, "state_dict"):
+            state_dict = loaded.policy_net.state_dict()
+        else:
+            raise AttributeError("Loaded object does not contain a state_dict")
+
         self.model.load_state_dict(state_dict)
         self.model.eval()
 
