@@ -79,3 +79,29 @@ tests/test_game.py ........                                              [100%]
 
 ============================== 8 passed in 0.01s ===============================
 ```
+
+## 開発
+
+### lint
+
+`ruff` を使用して、lintを実行します。
+
+```bash
+uv run ruff check .
+```
+
+### format
+
+`ruff` を使用して、コードのフォーマットを実行します。
+
+```bash
+uv run ruff format .
+```
+
+### typecheck
+
+`mypy` を使用して、型チェックを実行します。
+
+```bash
+uv run mypy .
+```

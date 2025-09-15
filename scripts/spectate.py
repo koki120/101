@@ -11,7 +11,8 @@
 
 import json
 import logging
-import webbrowser
+
+# import webbrowser
 from pathlib import Path
 
 # --- 定数と設定 ---
@@ -245,7 +246,7 @@ def create_and_show_replay() -> None:
         )
 
         # ブラウザで開く
-        webbrowser.open_new_tab(OUTPUT_HTML_PATH.as_uri())
+        # webbrowser.open_new_tab(OUTPUT_HTML_PATH.as_uri())
 
     except FileNotFoundError:
         logger.error("Error: Data file not found at '%s'", DATA_PATH)

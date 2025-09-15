@@ -33,7 +33,8 @@ NUM_GAMES = 1  # 生成するゲーム数
 NUM_PLAYERS = 4
 HISTORY_LENGTH = 8
 ACTION_SIZE = 3
-STATE_SIZE = 35 + (NUM_PLAYERS + ACTION_SIZE) * HISTORY_LENGTH
+# Opponent hand prediction adds 32 values per opponent (2 cards * 16 ranks)
+STATE_SIZE = 35 + (NUM_PLAYERS + ACTION_SIZE) * HISTORY_LENGTH + (NUM_PLAYERS - 1) * 32
 
 
 # --- AIモデルと状態ベクトル化関数 (train_ai.pyから再利用) ---
@@ -82,8 +83,14 @@ def encode_state(s: State) -> np.ndarray:
     missing = HISTORY_LENGTH - len(recent)
     history_vec.extend([0.0] * (missing * (NUM_PLAYERS + ACTION_SIZE)))
 
+    # During training the model also receives opponent hand predictions.
+    # These weights are not available when running this script, so we pad
+    # the state vector with zeros for these features to match the expected
+    # dimensionality.
+    opponent_pred = [0.0] * ((NUM_PLAYERS - 1) * 32)
+
     state_vector = np.array(
-        hand_vec + total_vec + dir_vec + penalty_vec + history_vec,
+        hand_vec + total_vec + dir_vec + penalty_vec + history_vec + opponent_pred,
         dtype=np.float32,
     )
     return state_vector
@@ -143,8 +150,46 @@ class AIAgent:
             raise FileNotFoundError(f"学習済みモデルが見つかりません: {model_path}")
 
         logger.info("Loading model from: %s", model_path)
-        state_dict = torch.load(model_path, map_location=self.device)
-        self.policy_net.load_state_dict(state_dict)
+
+        loaded = torch.load(model_path, map_location=self.device)
+
+        # Support a variety of saved formats.  Some historical training scripts
+        # stored the entire agent object (with attributes like ``policy_net``),
+        # while newer versions save just the model's ``state_dict``.  To keep
+        # this data-collection utility robust, attempt to extract a state
+        # dictionary from whatever object was loaded.
+        if isinstance(loaded, dict):
+            # Common case: the raw ``state_dict`` or wrapped in a dictionary.
+            if "model_state_dict" in loaded:
+                state_dict = loaded["model_state_dict"]
+            elif "state_dict" in loaded:
+                state_dict = loaded["state_dict"]
+            elif "policy_net" in loaded and isinstance(loaded["policy_net"], dict):
+                state_dict = loaded["policy_net"]
+            else:
+                state_dict = loaded
+        else:
+            # Try typical attributes in priority order, guarding against
+            # partially-saved agent objects whose ``state_dict`` may raise if
+            # submodules like ``policy_net`` are missing.
+            state_dict = None
+            for obj in (
+                getattr(loaded, "model", None),
+                getattr(loaded, "policy_net", None),
+                loaded,
+            ):
+                if obj is None:
+                    continue
+                try:
+                    state_dict = obj.state_dict()
+                    break
+                except Exception:
+                    continue
+            if state_dict is None:
+                raise AttributeError("Loaded object does not contain a state_dict")
+
+        self.model.load_state_dict(state_dict)
+        self.model.eval()
 
     def select_action(
         self,
