@@ -35,6 +35,7 @@ HISTORY_LENGTH = 8
 ACTION_SIZE = 3
 STATE_SIZE = 35 + (NUM_PLAYERS + ACTION_SIZE) * HISTORY_LENGTH
 
+
 # --- AIモデルと状態ベクトル化関数 (train_ai.pyから再利用) ---
 
 
@@ -142,8 +143,8 @@ class AIAgent:
             raise FileNotFoundError(f"学習済みモデルが見つかりません: {model_path}")
 
         logger.info("Loading model from: %s", model_path)
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-        self.model.eval()
+        state_dict = torch.load(model_path, map_location=self.device)
+        self.policy_net.load_state_dict(state_dict)
 
     def select_action(
         self,
@@ -174,7 +175,7 @@ def collect_game_data(agent: AIAgent, num_games: int) -> list[LogEntry]:
     for i in range(num_games):
         logger.info("Simulating game %d/%d...", i + 1, num_games)
         s = reset(NUM_PLAYERS)
-        game_log = []
+        game_log: list[LogEntry] = []
         done = False
         turn = 0
         state_history: list[State] = []
@@ -191,7 +192,6 @@ def collect_game_data(agent: AIAgent, num_games: int) -> list[LogEntry]:
             action_history.append(action.value)
             reward_history.append(reward)
 
-            # 観戦用に詳細なログを記録
             cur_idx = s.public.turn
             if action in (Action.PLAY_HAND_0, Action.PLAY_HAND_1):
                 card = s.players[cur_idx].hand[action.value]
@@ -227,14 +227,12 @@ def collect_game_data(agent: AIAgent, num_games: int) -> list[LogEntry]:
 
 def main() -> None:
     """メイン関数：モデルをロードし、データ収集を実行して保存する。"""
-    # 出力ディレクトリの作成
     OUTPUT_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         agent = AIAgent(MODEL_PATH)
         game_data = collect_game_data(agent, NUM_GAMES)
 
-        # 収集したデータをJSONファイルとして保存
         with open(OUTPUT_DATA_PATH, "w", encoding="utf-8") as f:
             json.dump(game_data, f, indent=4)
 
@@ -244,8 +242,8 @@ def main() -> None:
     except FileNotFoundError as e:
         logger.error("Error: %s", e)
         logger.error(
-            "Please run the training script (train_ai.py) first to generate the model "
-            "file."
+            "Please run the training script (train_ai.py) first to generate the "
+            "model file."
         )
     except Exception as e:
         logger.error("An unexpected error occurred: %s", e)
