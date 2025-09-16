@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from functools import reduce
-from typing import NamedTuple, TypeAlias
+from typing import Final, NamedTuple, TypeAlias
 
 # ==== Card and action definitions ====
 
@@ -56,6 +56,7 @@ class PublicState:
     deck: tuple[Card, ...]
     discard: tuple[Card, ...]
     last_player: int | None
+    rng_seed: int = 0
     history: tuple[tuple[int, int], ...] = field(default_factory=tuple)
     pending_choice: PendingChoice | None = None
 
@@ -68,6 +69,17 @@ class State:
 
 
 # ==== Deck generation and shuffling ====
+
+
+_SEED_MODULUS: Final[int] = 2**63
+
+
+def _normalize_seed(seed: int | None) -> int:
+    return seed % _SEED_MODULUS if seed is not None else 0
+
+
+def _next_seed(seed: int) -> int:
+    return (seed + 1) % _SEED_MODULUS
 
 
 def _standard_deck() -> tuple[Card, ...]:
@@ -92,8 +104,8 @@ def _standard_deck() -> tuple[Card, ...]:
     )
 
 
-def _shuffle(deck: tuple[Card, ...], seed: int | None) -> tuple[Card, ...]:
-    rng = random.Random(seed)
+def _shuffle(deck: tuple[Card, ...], seed: int) -> tuple[Card, ...]:
+    rng = random.Random(_normalize_seed(seed))
     return tuple(rng.sample(deck, k=len(deck)))
 
 
@@ -129,7 +141,7 @@ def _first_alive(alive: tuple[bool, ...]) -> int:
 
 # ==== Initialization and legal actions ====
 
-START_LP_DEFAULT = 10
+START_LP_DEFAULT: Final[int] = 10
 
 
 def _create_initial_players(
@@ -156,7 +168,8 @@ def reset(
 ) -> State:
     if num_players < 2:
         raise ValueError("The game requires at least two players")
-    deck = _shuffle(_standard_deck(), seed)
+    initial_seed = _normalize_seed(seed)
+    deck = _shuffle(_standard_deck(), initial_seed)
     players, deck = _create_initial_players(num_players, start_lp, deck)
     public = PublicState(
         turn=0,
@@ -166,6 +179,7 @@ def reset(
         deck=deck,
         discard=tuple(),
         last_player=None,
+        rng_seed=_next_seed(initial_seed),
         history=tuple(),
     )
     alive = tuple(True for _ in range(num_players))
@@ -438,6 +452,7 @@ def _handle_counter(
         alive=state.alive,
         carry_penalty_level=False,
         prev_penalty_level=state.public.penalty_level,
+        rng_seed=state.public.rng_seed,
     )
     return (
         next_state,
@@ -474,6 +489,7 @@ def _handle_reset(
         deck=remaining_deck,
         discard=state.public.discard + (resolution.used_card,),
         last_player=me_idx,
+        rng_seed=state.public.rng_seed,
         history=tuple(),
     )
     next_state = replace(state, players=updated_players, public=new_public)
@@ -508,6 +524,7 @@ def _handle_standard_play(
         deck=deck_after,
         discard=state.public.discard + (resolution.used_card,),
         last_player=me_idx,
+        rng_seed=state.public.rng_seed,
         history=history,
     )
     next_state = replace(state, players=updated_players, public=new_public)
@@ -524,6 +541,7 @@ def _handle_standard_play(
             alive=damaged_state.alive,
             carry_penalty_level=False,
             prev_penalty_level=state.public.penalty_level,
+            rng_seed=next_state.public.rng_seed,
         )
         burst_reward = reward + reward_scheme.on_burst_loss
         final_reward = burst_reward + (reward_scheme.on_burst_win if done else 0.0)
@@ -603,6 +621,7 @@ def _round_draw_and_continue(
         alive=s.alive,
         carry_penalty_level=True,
         prev_penalty_level=s.public.penalty_level,
+        rng_seed=s.public.rng_seed,
     )
     return (
         next_state,
@@ -640,7 +659,8 @@ def _start_next_round(
     players: tuple[PlayerState, ...],
     alive: tuple[bool, ...],
     carry_penalty_level: bool,
-    prev_penalty_level: int = 1,
+    prev_penalty_level: int,
+    rng_seed: int,
 ) -> State:
     """Start a fresh round.
 
@@ -655,7 +675,8 @@ def _start_next_round(
         A new ``State`` representing the beginning of the round.
     """
 
-    deck = _shuffle(_standard_deck(), seed=None)
+    normalized_seed = _normalize_seed(rng_seed)
+    deck = _shuffle(_standard_deck(), normalized_seed)
     new_players, deck = _deal_round_players(players, alive, deck)
     penalty_level = prev_penalty_level if carry_penalty_level else 1
 
@@ -667,6 +688,7 @@ def _start_next_round(
         deck=deck,
         discard=tuple(),
         last_player=None,
+        rng_seed=_next_seed(normalized_seed),
         history=tuple(),
     )
     return State(players=new_players, public=public, alive=alive)
@@ -704,12 +726,14 @@ def _start_round_after_event(
     alive: tuple[bool, ...],
     carry_penalty_level: bool,
     prev_penalty_level: int,
+    rng_seed: int,
 ) -> tuple[State, bool, int | None]:
     next_state = _start_next_round(
         players=players,
         alive=alive,
         carry_penalty_level=carry_penalty_level,
         prev_penalty_level=prev_penalty_level,
+        rng_seed=rng_seed,
     )
     cleaned_state = _apply_elimination(next_state)
     done, winner = _check_game_end(cleaned_state)
