@@ -3,7 +3,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
-from typing import NamedTuple
+from functools import reduce
+from typing import Callable, NamedTuple
 
 # ==== Card and action definitions ====
 
@@ -64,7 +65,7 @@ class State:
 
 
 def _standard_deck() -> tuple[Card, ...]:
-    ranks = [
+    ranks = (
         Rank.R2,
         Rank.R3,
         Rank.R4,
@@ -78,17 +79,16 @@ def _standard_deck() -> tuple[Card, ...]:
         Rank.Q,
         Rank.K,
         Rank.A,
-    ]
-    deck = [Card(r) for r in ranks for _ in range(4)]
-    deck.extend([Card(Rank.JK), Card(Rank.JK)])
-    return tuple(deck)
+    )
+    return tuple(Card(rank) for rank in ranks for _ in range(4)) + (
+        Card(Rank.JK),
+        Card(Rank.JK),
+    )
 
 
 def _shuffle(deck: tuple[Card, ...], seed: int | None) -> tuple[Card, ...]:
     rng = random.Random(seed)
-    d = list(deck)
-    rng.shuffle(d)
-    return tuple(d)
+    return tuple(rng.sample(deck, k=len(deck)))
 
 
 def _draw_top(deck: tuple[Card, ...]) -> tuple[Card | None, tuple[Card, ...]]:
@@ -97,25 +97,47 @@ def _draw_top(deck: tuple[Card, ...]) -> tuple[Card | None, tuple[Card, ...]]:
     return deck[0], deck[1:]
 
 
+def _draw_hand(
+    deck: tuple[Card, ...],
+) -> tuple[tuple[Card | None, Card | None], tuple[Card, ...]]:
+    first, remaining = _draw_top(deck)
+    second, remaining_after = _draw_top(remaining)
+    return (first, second), remaining_after
+
+
 def _next_turn_idx(turn: int, direction: int, alive: tuple[bool, ...]) -> int:
     n = len(alive)
-    i = turn
-    while True:
-        i = (i + direction) % n
-        if alive[i]:
-            return i
+    indices = ((turn + direction * step) % n for step in range(1, n + 1))
+    try:
+        return next(idx for idx in indices if alive[idx])
+    except StopIteration as exc:
+        raise ValueError("No players are alive") from exc
 
 
 def _first_alive(alive: tuple[bool, ...]) -> int:
-    for i, a in enumerate(alive):
-        if a:
-            return i
-    raise ValueError("No players are alive")
+    try:
+        return next(i for i, alive_flag in enumerate(alive) if alive_flag)
+    except StopIteration as exc:
+        raise ValueError("No players are alive") from exc
 
 
 # ==== Initialization and legal actions ====
 
 START_LP_DEFAULT = 10
+
+
+def _create_initial_players(
+    num_players: int, start_lp: int, deck: tuple[Card, ...]
+) -> tuple[tuple[PlayerState, ...], tuple[Card, ...]]:
+    def deal(
+        acc: tuple[tuple[PlayerState, ...], tuple[Card, ...]], _: int
+    ) -> tuple[tuple[PlayerState, ...], tuple[Card, ...]]:
+        players_acc, current_deck = acc
+        hand, remaining_deck = _draw_hand(current_deck)
+        player = PlayerState(lp=start_lp, hand=hand)
+        return players_acc + (player,), remaining_deck
+
+    return reduce(deal, range(num_players), (tuple(), deck))
 
 
 def reset(
@@ -124,11 +146,7 @@ def reset(
     if num_players < 2:
         raise ValueError("The game requires at least two players")
     deck = _shuffle(_standard_deck(), seed)
-    players: list[PlayerState] = []
-    for _ in range(num_players):
-        c1, deck = _draw_top(deck)
-        c2, deck = _draw_top(deck)
-        players.append(PlayerState(lp=start_lp, hand=(c1, c2)))
+    players, deck = _create_initial_players(num_players, start_lp, deck)
     public = PublicState(
         turn=0,
         direction=+1,
@@ -140,20 +158,22 @@ def reset(
         history=tuple(),
     )
     alive = tuple(True for _ in range(num_players))
-    return State(players=tuple(players), public=public, alive=alive)
+    return State(players=players, public=public, alive=alive)
 
 
 def legal_actions(state: State) -> tuple[Action, ...]:
     p = state.public
     me = state.players[p.turn]
-    actions = []
-    if me.hand[0] is not None:
-        actions.append(Action.PLAY_HAND_0)
-    if me.hand[1] is not None:
-        actions.append(Action.PLAY_HAND_1)
-    if p.deck:
-        actions.append(Action.PLAY_DECK)
-    return tuple(actions)
+    hand_actions = tuple(
+        action
+        for action, card in (
+            (Action.PLAY_HAND_0, me.hand[0]),
+            (Action.PLAY_HAND_1, me.hand[1]),
+        )
+        if card is not None
+    )
+    deck_action = (Action.PLAY_DECK,) if p.deck else tuple()
+    return hand_actions + deck_action
 
 
 def action_mask(state: State) -> tuple[int, ...]:
@@ -166,10 +186,8 @@ def action_mask(state: State) -> tuple[int, ...]:
     learning agents that expect a fixed-size action space with masking support.
     """
 
-    mask = [0] * len(Action)
-    for a in legal_actions(state):
-        mask[int(a)] = 1
-    return tuple(mask)
+    legal = frozenset(legal_actions(state))
+    return tuple(int(action in legal) for action in Action)
 
 
 # ==== Card effect logic ====
@@ -181,6 +199,13 @@ class EffectResult(NamedTuple):
     reset_triggered: bool
     counter_triggered: bool
     used_card: Card
+
+
+@dataclass(frozen=True)
+class ResolvedAction:
+    used_card: Card
+    deck_after_play: tuple[Card, ...]
+    replacement_index: int | None
 
 
 def _prefer_plus(total: int) -> bool:
@@ -220,15 +245,12 @@ def _apply_card_effect(total: int, direction: int, card: Card) -> EffectResult:
         new_total = total + 30
         return EffectResult(new_total, direction, new_total == 101, False, card)
     if r == Rank.A:
-        candidates = [total + 1, total + 11]
+        candidates = (total + 1, total + 11)
         for t in candidates:
             if t == 101:
                 return EffectResult(t, direction, True, False, card)
-        safe = [t for t in candidates if t <= 101]
-        if safe:
-            new_total = max(safe)
-        else:
-            new_total = max(candidates)
+        safe = tuple(t for t in candidates if t <= 101)
+        new_total = max(safe) if safe else max(candidates)
         return EffectResult(new_total, direction, new_total == 101, False, card)
     if r == Rank.JK:
         if total == 100:
@@ -249,137 +271,212 @@ class RewardScheme(NamedTuple):
 # ==== Main step function ====
 
 
+def _resolve_action(state: State, action: Action) -> ResolvedAction | None:
+    public = state.public
+    me = state.players[public.turn]
+    if action == Action.PLAY_HAND_0:
+        card = me.hand[0]
+        return ResolvedAction(card, public.deck, 0) if card is not None else None
+    if action == Action.PLAY_HAND_1:
+        card = me.hand[1]
+        return ResolvedAction(card, public.deck, 1) if card is not None else None
+    if action == Action.PLAY_DECK:
+        card, remaining_deck = _draw_top(public.deck)
+        return ResolvedAction(card, remaining_deck, None) if card is not None else None
+    return None
+
+
+def _update_player(
+    players: tuple[PlayerState, ...],
+    target_idx: int,
+    update_fn: Callable[[PlayerState], PlayerState],
+) -> tuple[PlayerState, ...]:
+    return tuple(
+        update_fn(player) if idx == target_idx else player
+        for idx, player in enumerate(players)
+    )
+
+
+def _maybe_replace_hand(
+    hand: tuple[Card | None, Card | None],
+    replacement_index: int | None,
+    deck: tuple[Card, ...],
+) -> tuple[tuple[Card | None, Card | None], tuple[Card, ...]] | None:
+    if replacement_index is None:
+        return hand, deck
+    drawn, remaining = _draw_top(deck)
+    if drawn is None:
+        return None
+    return _replace_hand(hand, replacement_index, drawn), remaining
+
+
+def _handle_counter(
+    state: State,
+    me_idx: int,
+    reward: float,
+    base_info: dict[str, int | str | int | None],
+    reward_scheme: RewardScheme,
+) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+    penalty = state.public.penalty_level
+    incremented_players = _update_player(
+        state.players, me_idx, lambda pl: replace(pl, lp=pl.lp + penalty)
+    )
+    prev_idx = state.public.last_player
+    updated_players = (
+        _update_player(
+            incremented_players,
+            prev_idx,
+            lambda pl: replace(pl, lp=pl.lp - penalty),
+        )
+        if prev_idx is not None and state.alive[prev_idx]
+        else incremented_players
+    )
+    reward_delta = reward_scheme.on_counter_self + (
+        reward_scheme.on_counter_prev
+        if prev_idx is not None and state.alive[prev_idx]
+        else 0.0
+    )
+    next_state, done, winner = _start_round_after_event(
+        players=updated_players,
+        alive=state.alive,
+        carry_penalty_level=False,
+        prev_penalty_level=state.public.penalty_level,
+    )
+    return (
+        next_state,
+        reward + reward_delta,
+        done,
+        base_info | {"event": "counter", "winner": winner},
+    )
+
+
+def _handle_reset(
+    state: State,
+    me_idx: int,
+    me: PlayerState,
+    effect: EffectResult,
+    reward: float,
+    base_info: dict[str, int | str | int | None],
+    resolution: ResolvedAction,
+) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+    top_card, after_deck = _draw_top(resolution.deck_after_play)
+    if top_card is None:
+        return _round_draw_and_continue(state, reward, base_info)
+    replacement = _maybe_replace_hand(me.hand, resolution.replacement_index, after_deck)
+    if replacement is None:
+        return _round_draw_and_continue(state, reward, base_info)
+    new_hand, remaining_deck = replacement
+    updated_players = _update_player(
+        state.players, me_idx, lambda pl: replace(pl, hand=new_hand)
+    )
+    new_public = PublicState(
+        turn=_next_turn_idx(me_idx, effect.direction, state.alive),
+        direction=effect.direction,
+        total=_start_total_from_card(top_card),
+        penalty_level=state.public.penalty_level + 1,
+        deck=remaining_deck,
+        discard=state.public.discard + (resolution.used_card,),
+        last_player=me_idx,
+        history=tuple(),
+    )
+    next_state = replace(state, players=updated_players, public=new_public)
+    return next_state, reward, False, base_info | {"event": "reset"}
+
+
+def _handle_standard_play(
+    state: State,
+    me_idx: int,
+    me: PlayerState,
+    effect: EffectResult,
+    reward: float,
+    base_info: dict[str, int | str | int | None],
+    reward_scheme: RewardScheme,
+    resolution: ResolvedAction,
+    history: tuple[tuple[int, int], ...],
+) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+    replacement = _maybe_replace_hand(
+        me.hand, resolution.replacement_index, resolution.deck_after_play
+    )
+    if replacement is None:
+        return _round_draw_and_continue(state, reward, base_info)
+    new_hand, deck_after = replacement
+    updated_players = _update_player(
+        state.players, me_idx, lambda pl: replace(pl, hand=new_hand)
+    )
+    new_public = PublicState(
+        turn=_next_turn_idx(me_idx, effect.direction, state.alive),
+        direction=effect.direction,
+        total=effect.total,
+        penalty_level=state.public.penalty_level,
+        deck=deck_after,
+        discard=state.public.discard + (resolution.used_card,),
+        last_player=me_idx,
+        history=history,
+    )
+    next_state = replace(state, players=updated_players, public=new_public)
+    if effect.total > 101:
+        penalty = state.public.penalty_level
+        damaged_players = _update_player(
+            next_state.players,
+            me_idx,
+            lambda pl: replace(pl, lp=pl.lp - penalty),
+        )
+        damaged_state = replace(next_state, players=damaged_players)
+        post_round_state, done, winner = _start_round_after_event(
+            players=damaged_state.players,
+            alive=damaged_state.alive,
+            carry_penalty_level=False,
+            prev_penalty_level=state.public.penalty_level,
+        )
+        burst_reward = reward + reward_scheme.on_burst_loss
+        final_reward = burst_reward + (reward_scheme.on_burst_win if done else 0.0)
+        return (
+            post_round_state,
+            final_reward,
+            done,
+            base_info | {"event": "burst", "winner": winner},
+        )
+    if not new_public.deck:
+        return _round_draw_and_continue(next_state, reward, base_info)
+    return next_state, reward, False, base_info
+
+
 def step(
     state: State, action: Action, reward_scheme: RewardScheme | None = None
 ) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
-    s = state
-    p = s.public
+    resolution = _resolve_action(state, action)
+    if resolution is None:
+        return state, 0.0, False, {"invalid": True}
     reward_scheme = reward_scheme or RewardScheme()
-    me_idx = p.turn
-    me = s.players[me_idx]
-    used_card: Card | None = None
-    new_deck = p.deck
-    new_hand = me.hand
-    if action == Action.PLAY_HAND_0:
-        used_card = me.hand[0]
-        if used_card is None:
-            return s, 0.0, False, {"invalid": True}
-    elif action == Action.PLAY_HAND_1:
-        used_card = me.hand[1]
-        if used_card is None:
-            return s, 0.0, False, {"invalid": True}
-    elif action == Action.PLAY_DECK:
-        used_card, new_deck = _draw_top(p.deck)
-        if used_card is None:
-            return s, 0.0, False, {"invalid": True}
-    else:
-        return s, 0.0, False, {"invalid": True}
-    eff = _apply_card_effect(p.total, p.direction, used_card)
-    reward: float = reward_scheme.step_penalty
-    info: dict[str, int | str | int | None] = {"used_card": int(used_card.rank)}
-    new_history = s.public.history + ((me_idx, int(action)),)
-    # Joker counter effect
-    if eff.counter_triggered:
-        new_players_list = list(s.players)
-        new_players_list[me_idx] = replace(
-            new_players_list[me_idx], lp=new_players_list[me_idx].lp + p.penalty_level
-        )
-        reward += reward_scheme.on_counter_self
-        prev_idx = p.last_player
-        if prev_idx is not None and s.alive[prev_idx]:
-            new_players_list[prev_idx] = replace(
-                new_players_list[prev_idx],
-                lp=new_players_list[prev_idx].lp - p.penalty_level,
-            )
-            reward += reward_scheme.on_counter_prev
-        next_state = _start_next_round(
-            players=tuple(new_players_list),
-            alive=s.alive,
-            carry_penalty_level=False,
-            prev_penalty_level=p.penalty_level,
-        )
-        next_state = _apply_elimination(next_state)
-        done, winner = _check_game_end(next_state)
-        info["event"] = "counter"
-        info["winner"] = winner
-        return next_state, reward, done, info
-    # Reset effect
-    if eff.reset_triggered:
-        top_card, after_deck = _draw_top(new_deck)
-        if top_card is None:
-            return _round_draw_and_continue(s, reward, info)
-        next_turn = _next_turn_idx(me_idx, eff.direction, s.alive)
-        if action != Action.PLAY_DECK:
-            drawn, remaining_deck = _draw_top(after_deck)
-            if drawn is None:
-                return _round_draw_and_continue(s, reward, info)
-            new_hand = _replace_hand(
-                me.hand, 0 if action == Action.PLAY_HAND_0 else 1, drawn
-            )
-            after_deck = remaining_deck
-        new_players = list(s.players)
-        new_players[me_idx] = replace(me, hand=new_hand)
-        new_public = PublicState(
-            turn=next_turn,
-            direction=eff.direction,
-            total=_start_total_from_card(top_card),
-            penalty_level=p.penalty_level + 1,
-            deck=after_deck,
-            discard=p.discard + (used_card,),
-            last_player=me_idx,
-            history=tuple(),
-        )
-        next_state = replace(s, players=tuple(new_players), public=new_public)
-        info["event"] = "reset"
-        return next_state, reward, False, info
-    # Normal play
-    new_total = eff.total
-    burst = new_total > 101
-    if action != Action.PLAY_DECK:
-        drawn, new_deck2 = _draw_top(new_deck)
-        if drawn is None:
-            return _round_draw_and_continue(s, reward, info)
-        new_deck = new_deck2
-        new_hand = _replace_hand(
-            me.hand, 0 if action == Action.PLAY_HAND_0 else 1, drawn
-        )
-    next_turn = _next_turn_idx(me_idx, eff.direction, s.alive)
-    new_players = list(s.players)
-    new_players[me_idx] = replace(me, hand=new_hand)
-    new_public = PublicState(
-        turn=next_turn,
-        direction=eff.direction,
-        total=new_total,
-        penalty_level=p.penalty_level,
-        deck=new_deck,
-        discard=p.discard + (used_card,),
-        last_player=me_idx,
-        history=new_history,
+    me_idx = state.public.turn
+    me = state.players[me_idx]
+    effect = _apply_card_effect(
+        state.public.total, state.public.direction, resolution.used_card
     )
-    next_state = replace(s, players=tuple(new_players), public=new_public)
-    if burst:
-        damaged_players = list(next_state.players)
-        damaged_players[me_idx] = replace(
-            damaged_players[me_idx], lp=damaged_players[me_idx].lp - p.penalty_level
+    base_info: dict[str, int | str | int | None] = {
+        "used_card": int(resolution.used_card.rank)
+    }
+    history = state.public.history + ((me_idx, int(action)),)
+    reward = reward_scheme.step_penalty
+    return (
+        _handle_counter(state, me_idx, reward, base_info, reward_scheme)
+        if effect.counter_triggered
+        else (
+            _handle_reset(state, me_idx, me, effect, reward, base_info, resolution)
+            if effect.reset_triggered
+            else _handle_standard_play(
+                state,
+                me_idx,
+                me,
+                effect,
+                reward,
+                base_info,
+                reward_scheme,
+                resolution,
+                history,
+            )
         )
-        reward += reward_scheme.on_burst_loss
-        next_state = replace(next_state, players=tuple(damaged_players))
-        next_state = _start_next_round(
-            players=next_state.players,
-            alive=next_state.alive,
-            carry_penalty_level=False,
-            prev_penalty_level=p.penalty_level,
-        )
-        next_state = _apply_elimination(next_state)
-        done, winner = _check_game_end(next_state)
-        if done:
-            reward += reward_scheme.on_burst_win
-        info["event"] = "burst"
-        info["winner"] = winner
-        return next_state, reward, done, info
-    if not new_public.deck:
-        return _round_draw_and_continue(next_state, reward, info)
-    return next_state, reward, False, info
+    )
 
 
 def _start_total_from_card(card: Card) -> int:
@@ -404,18 +501,39 @@ def _start_total_from_card(card: Card) -> int:
 
 
 def _round_draw_and_continue(
-    s: State, reward: float, info: dict[str, int | str | int | None]
+    s: State, reward: float, base_info: dict[str, int | str | int | None]
 ) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
-    next_state = _start_next_round(
+    next_state, done, winner = _start_round_after_event(
         players=s.players,
         alive=s.alive,
         carry_penalty_level=True,
         prev_penalty_level=s.public.penalty_level,
     )
-    done, winner = _check_game_end(next_state)
-    info["event"] = "deck_exhausted"
-    info["winner"] = winner
-    return next_state, reward, done, info
+    return (
+        next_state,
+        reward,
+        done,
+        base_info | {"event": "deck_exhausted", "winner": winner},
+    )
+
+
+def _deal_round_players(
+    players: tuple[PlayerState, ...],
+    alive: tuple[bool, ...],
+    deck: tuple[Card, ...],
+) -> tuple[tuple[PlayerState, ...], tuple[Card, ...]]:
+    def deal(
+        acc: tuple[tuple[PlayerState, ...], tuple[Card, ...]],
+        payload: tuple[int, PlayerState],
+    ) -> tuple[tuple[PlayerState, ...], tuple[Card, ...]]:
+        players_acc, current_deck = acc
+        idx, player = payload
+        if not alive[idx]:
+            return players_acc + (player,), current_deck
+        hand, remaining_deck = _draw_hand(current_deck)
+        return players_acc + (replace(player, hand=hand),), remaining_deck
+
+    return reduce(deal, enumerate(players), (tuple(), deck))
 
 
 def _start_next_round(
@@ -438,15 +556,7 @@ def _start_next_round(
     """
 
     deck = _shuffle(_standard_deck(), seed=None)
-    new_players_list: list[PlayerState] = []
-    for i, pl in enumerate(players):
-        if not alive[i]:
-            new_players_list.append(pl)
-            continue
-        c1, deck = _draw_top(deck)
-        c2, deck = _draw_top(deck)
-        new_players_list.append(replace(pl, hand=(c1, c2)))
-
+    new_players, deck = _deal_round_players(players, alive, deck)
     penalty_level = prev_penalty_level if carry_penalty_level else 1
 
     public = PublicState(
@@ -459,7 +569,7 @@ def _start_next_round(
         last_player=None,
         history=tuple(),
     )
-    return State(players=tuple(new_players_list), public=public, alive=alive)
+    return State(players=new_players, public=public, alive=alive)
 
 
 def _replace_hand(
@@ -469,18 +579,41 @@ def _replace_hand(
 
 
 def _apply_elimination(state: State) -> State:
-    new_alive = list(state.alive)
-    for i, pl in enumerate(state.players):
-        if new_alive[i] and pl.lp <= 0:
-            new_alive[i] = False
-    return replace(state, alive=tuple(new_alive))
+    return replace(
+        state,
+        alive=tuple(
+            False if alive_flag and player.lp <= 0 else alive_flag
+            for alive_flag, player in zip(state.alive, state.players, strict=True)
+        ),
+    )
 
 
 def _check_game_end(state: State) -> tuple[bool, int | None]:
-    alive_idxs = [i for i, a in enumerate(state.alive) if a]
-    if len(alive_idxs) <= 1:
-        return True, (alive_idxs[0] if alive_idxs else None)
-    return False, None
+    alive_idxs = tuple(i for i, flag in enumerate(state.alive) if flag)
+    return (
+        (True, alive_idxs[0])
+        if len(alive_idxs) == 1
+        else (True, None)
+        if not alive_idxs
+        else (False, None)
+    )
+
+
+def _start_round_after_event(
+    players: tuple[PlayerState, ...],
+    alive: tuple[bool, ...],
+    carry_penalty_level: bool,
+    prev_penalty_level: int,
+) -> tuple[State, bool, int | None]:
+    next_state = _start_next_round(
+        players=players,
+        alive=alive,
+        carry_penalty_level=carry_penalty_level,
+        prev_penalty_level=prev_penalty_level,
+    )
+    cleaned_state = _apply_elimination(next_state)
+    done, winner = _check_game_end(cleaned_state)
+    return cleaned_state, done, winner
 
 
 # ==== Observation and encoding ====
