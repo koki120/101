@@ -168,7 +168,14 @@ HTML_TEMPLATE = """
     </div>
     <div class="controls">
         <label for="speed-control">再生速度</label>
-        <input type="range" id="speed-control" min="200" max="2000" step="100" value="800">
+        <input
+            type="range"
+            id="speed-control"
+            min="200"
+            max="2000"
+            step="100"
+            value="800"
+        >
         <span id="speed-display">0.8秒/ターン</span>
     </div>
 
