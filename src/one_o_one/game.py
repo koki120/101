@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from functools import reduce
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 
 # ==== Card and action definitions ====
 
