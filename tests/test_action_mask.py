@@ -6,6 +6,7 @@ from one_o_one.game import (
     Rank,
     State,
     action_mask,
+    step,
 )
 
 
@@ -15,6 +16,7 @@ def _mk_state(
     deck: tuple[Rank, ...],
     turn: int = 0,
     num_players: int = 2,
+    total: int = 0,
 ) -> State:
     """Construct a minimal ``State`` for mask testing."""
 
@@ -32,7 +34,7 @@ def _mk_state(
     public = PublicState(
         turn=turn,
         direction=1,
-        total=0,
+        total=total,
         penalty_level=1,
         deck=tuple(Card(r) for r in deck),
         discard=tuple(),
@@ -46,7 +48,14 @@ def _mk_state(
 def test_mask_allows_only_legal_actions() -> None:
     state = _mk_state(hand=(Rank.R2, Rank.R3), deck=(Rank.R4,))
     mask = action_mask(state)
-    assert mask == (1, 1, 1)
+    assert len(mask) == len(Action)
+    assert mask[Action.PLAY_HAND_0] == 1
+    assert mask[Action.PLAY_HAND_1] == 1
+    assert mask[Action.PLAY_DECK] == 1
+    assert mask[Action.PLAY_TEN_PLUS] == 0
+    assert mask[Action.PLAY_TEN_MINUS] == 0
+    assert mask[Action.PLAY_ACE_ONE] == 0
+    assert mask[Action.PLAY_ACE_ELEVEN] == 0
 
     state = _mk_state(hand=(Rank.R2, None), deck=(Rank.R4,))
     mask = action_mask(state)
@@ -57,3 +66,21 @@ def test_mask_allows_only_legal_actions() -> None:
     state = _mk_state(hand=(Rank.R2, None), deck=tuple())
     mask = action_mask(state)
     assert mask[Action.PLAY_DECK] == 0
+
+
+def test_mask_restricts_to_choice_actions_during_pending() -> None:
+    state = _mk_state(hand=(Rank.R10, Rank.R3), deck=(Rank.R4,), total=50)
+    choice_state, _, _, _ = step(state, Action.PLAY_HAND_0)
+    mask = action_mask(choice_state)
+    assert mask[Action.PLAY_TEN_PLUS] == 1
+    assert mask[Action.PLAY_TEN_MINUS] == 1
+    assert mask[Action.PLAY_HAND_0] == 0
+    assert mask[Action.PLAY_DECK] == 0
+
+
+def test_minus_choice_blocked_when_total_low() -> None:
+    state = _mk_state(hand=(Rank.R10, Rank.R3), deck=(Rank.R4,), total=9)
+    choice_state, _, _, _ = step(state, Action.PLAY_HAND_0)
+    mask = action_mask(choice_state)
+    assert mask[Action.PLAY_TEN_PLUS] == 1
+    assert mask[Action.PLAY_TEN_MINUS] == 0

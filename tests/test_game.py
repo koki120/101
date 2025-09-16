@@ -54,8 +54,18 @@ def test_reverse_card_reverses_direction() -> None:
 
 def test_ten_card_moves_total_toward_101() -> None:
     initial_state = _mk_state_for_test(total=50, my_hand=(Rank.R10, Rank.R2))
-    next_state, _, _, _ = step(initial_state, Action.PLAY_HAND_0)
+    choice_state, _, _, info = step(initial_state, Action.PLAY_HAND_0)
+    assert info["needs_choice"] is True
+    assert choice_state.public.pending_choice is not None
+    next_state, _, _, _ = step(choice_state, Action.PLAY_TEN_PLUS)
     assert next_state.public.total == 60
+
+
+def test_ten_card_allows_minus_choice() -> None:
+    initial_state = _mk_state_for_test(total=50, my_hand=(Rank.R10, Rank.R2))
+    choice_state, _, _, _ = step(initial_state, Action.PLAY_HAND_0)
+    next_state, _, _, _ = step(choice_state, Action.PLAY_TEN_MINUS)
+    assert next_state.public.total == 40
 
 
 def test_king_card_adds_30_to_total() -> None:
@@ -79,11 +89,19 @@ def test_exact_101_resets_total_and_increases_penalty() -> None:
     initial_state = _mk_state_for_test(
         total=100, my_hand=(Rank.A, Rank.R3), penalty_level=3
     )
-    next_state, _, done, _ = step(initial_state, Action.PLAY_HAND_0)
+    choice_state, _, _, _ = step(initial_state, Action.PLAY_HAND_0)
+    next_state, _, done, _ = step(choice_state, Action.PLAY_ACE_ONE)
     assert done is False
     assert next_state.public.total == 2
     assert next_state.public.penalty_level == 4
     assert next_state.players[0].lp == 10
+
+
+def test_ace_allows_eleven_choice() -> None:
+    initial_state = _mk_state_for_test(total=50, my_hand=(Rank.A, Rank.R2))
+    choice_state, _, _, _ = step(initial_state, Action.PLAY_HAND_0)
+    next_state, _, _, _ = step(choice_state, Action.PLAY_ACE_ELEVEN)
+    assert next_state.public.total == 61
 
 
 def test_player_draws_card_after_playing() -> None:
