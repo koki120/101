@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from functools import reduce
-from typing import NamedTuple
+from typing import NamedTuple, TypeAlias
 
 # ==== Card and action definitions ====
 
@@ -35,6 +35,10 @@ class Action(IntEnum):
     PLAY_HAND_0 = 0
     PLAY_HAND_1 = 1
     PLAY_DECK = 2
+    PLAY_TEN_PLUS = 3
+    PLAY_TEN_MINUS = 4
+    PLAY_ACE_ONE = 5
+    PLAY_ACE_ELEVEN = 6
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,7 @@ class PublicState:
     discard: tuple[Card, ...]
     last_player: int | None
     history: tuple[tuple[int, int], ...] = field(default_factory=tuple)
+    pending_choice: PendingChoice | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +174,16 @@ def reset(
 
 def legal_actions(state: State) -> tuple[Action, ...]:
     p = state.public
+    pending = p.pending_choice
+    if pending is not None:
+        rank = pending.resolution.used_card.rank
+        if rank == Rank.R10:
+            plus = (Action.PLAY_TEN_PLUS,)
+            minus = (Action.PLAY_TEN_MINUS,) if p.total > 9 else tuple()
+            return plus + minus
+        if rank == Rank.A:
+            return (Action.PLAY_ACE_ONE, Action.PLAY_ACE_ELEVEN)
+        return tuple()
     me = state.players[p.turn]
     hand_actions = tuple(
         action
@@ -214,14 +229,14 @@ class ResolvedAction:
     replacement_index: int | None
 
 
-def _prefer_plus(total: int) -> bool:
-    plus = total + 10
-    minus = total - 10
+@dataclass(frozen=True)
+class PendingChoice:
+    player_index: int
+    resolution: ResolvedAction
 
-    def score(t: int) -> tuple[int, int]:
-        return (0 if t <= 101 else 1, abs(101 - t))
 
-    return score(plus) <= score(minus)
+InfoValue: TypeAlias = int | str | bool | None
+InfoDict: TypeAlias = dict[str, InfoValue]
 
 
 def _apply_card_effect(total: int, direction: int, card: Card) -> EffectResult:
@@ -233,14 +248,6 @@ def _apply_card_effect(total: int, direction: int, card: Card) -> EffectResult:
     if Rank.R2 <= r <= Rank.R7:
         new_total = total + int(r)
         return EffectResult(new_total, direction, new_total == 101, False, card)
-    if r == Rank.R10:
-        plus_total = total + 10
-        minus_total = total - 10
-        if total <= 9:
-            new_total = plus_total
-        else:
-            new_total = plus_total if _prefer_plus(total) else minus_total
-        return EffectResult(new_total, direction, new_total == 101, False, card)
     if r == Rank.J:
         new_total = total + 10
         return EffectResult(new_total, direction, new_total == 101, False, card)
@@ -250,20 +257,37 @@ def _apply_card_effect(total: int, direction: int, card: Card) -> EffectResult:
     if r == Rank.K:
         new_total = total + 30
         return EffectResult(new_total, direction, new_total == 101, False, card)
-    if r == Rank.A:
-        candidates = (total + 1, total + 11)
-        for t in candidates:
-            if t == 101:
-                return EffectResult(t, direction, True, False, card)
-        safe = tuple(t for t in candidates if t <= 101)
-        new_total = max(safe) if safe else max(candidates)
-        return EffectResult(new_total, direction, new_total == 101, False, card)
+    if r in (Rank.R10, Rank.A):
+        raise ValueError("Choice-based card requires explicit resolution")
     if r == Rank.JK:
         if total == 100:
             return EffectResult(total, direction, False, True, card)
         new_total = total + 50
         return EffectResult(new_total, direction, new_total == 101, False, card)
     raise ValueError("Unknown card rank")
+
+
+def _apply_choice_effect(
+    total: int, direction: int, card: Card, action: Action
+) -> EffectResult | None:
+    r = card.rank
+    if r == Rank.R10:
+        if action == Action.PLAY_TEN_PLUS:
+            new_total = total + 10
+            return EffectResult(new_total, direction, new_total == 101, False, card)
+        if action == Action.PLAY_TEN_MINUS and total > 9:
+            new_total = total - 10
+            return EffectResult(new_total, direction, new_total == 101, False, card)
+        return None
+    if r == Rank.A:
+        if action == Action.PLAY_ACE_ONE:
+            new_total = total + 1
+            return EffectResult(new_total, direction, new_total == 101, False, card)
+        if action == Action.PLAY_ACE_ELEVEN:
+            new_total = total + 11
+            return EffectResult(new_total, direction, new_total == 101, False, card)
+        return None
+    return None
 
 
 class RewardScheme(NamedTuple):
@@ -290,6 +314,73 @@ def _resolve_action(state: State, action: Action) -> ResolvedAction | None:
         card, remaining_deck = _draw_top(public.deck)
         return ResolvedAction(card, remaining_deck, None) if card is not None else None
     return None
+
+
+def _start_pending_choice_state(
+    state: State, player_index: int, action: Action, resolution: ResolvedAction
+) -> tuple[State, float, bool, InfoDict]:
+    pending = PendingChoice(player_index=player_index, resolution=resolution)
+    history = state.public.history + ((player_index, int(action)),)
+    updated_public = replace(
+        state.public,
+        deck=resolution.deck_after_play,
+        history=history,
+        pending_choice=pending,
+    )
+    next_state = replace(state, public=updated_public)
+    info: InfoDict = {
+        "used_card": int(resolution.used_card.rank),
+        "needs_choice": True,
+    }
+    return next_state, 0.0, False, info
+
+
+def _resolve_pending_choice(
+    state: State, action: Action, reward_scheme: RewardScheme
+) -> tuple[State, float, bool, InfoDict]:
+    pending = state.public.pending_choice
+    if pending is None or pending.player_index != state.public.turn:
+        return state, 0.0, False, {"invalid": True}
+    card = pending.resolution.used_card
+    effect = _apply_choice_effect(
+        state.public.total, state.public.direction, card, action
+    )
+    if effect is None:
+        return state, 0.0, False, {"invalid": True}
+    base_info: InfoDict = {"used_card": int(card.rank)}
+    history = state.public.history + ((pending.player_index, int(action)),)
+    reward = reward_scheme.step_penalty
+    cleared_public = replace(state.public, pending_choice=None, history=history)
+    cleared_state = replace(state, public=cleared_public)
+    me_idx = pending.player_index
+    me = cleared_state.players[me_idx]
+    return (
+        _handle_counter(cleared_state, me_idx, reward, base_info, reward_scheme)
+        if effect.counter_triggered
+        else (
+            _handle_reset(
+                cleared_state,
+                me_idx,
+                me,
+                effect,
+                reward,
+                base_info,
+                pending.resolution,
+            )
+            if effect.reset_triggered
+            else _handle_standard_play(
+                cleared_state,
+                me_idx,
+                me,
+                effect,
+                reward,
+                base_info,
+                reward_scheme,
+                pending.resolution,
+                history,
+            )
+        )
+    )
 
 
 def _update_player(
@@ -320,9 +411,9 @@ def _handle_counter(
     state: State,
     me_idx: int,
     reward: float,
-    base_info: dict[str, int | str | int | None],
+    base_info: InfoDict,
     reward_scheme: RewardScheme,
-) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+) -> tuple[State, float, bool, InfoDict]:
     penalty = state.public.penalty_level
     incremented_players = _update_player(
         state.players, me_idx, lambda pl: replace(pl, lp=pl.lp + penalty)
@@ -362,9 +453,9 @@ def _handle_reset(
     me: PlayerState,
     effect: EffectResult,
     reward: float,
-    base_info: dict[str, int | str | int | None],
+    base_info: InfoDict,
     resolution: ResolvedAction,
-) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+) -> tuple[State, float, bool, InfoDict]:
     top_card, after_deck = _draw_top(resolution.deck_after_play)
     if top_card is None:
         return _round_draw_and_continue(state, reward, base_info)
@@ -395,11 +486,11 @@ def _handle_standard_play(
     me: PlayerState,
     effect: EffectResult,
     reward: float,
-    base_info: dict[str, int | str | int | None],
+    base_info: InfoDict,
     reward_scheme: RewardScheme,
     resolution: ResolvedAction,
     history: tuple[tuple[int, int], ...],
-) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+) -> tuple[State, float, bool, InfoDict]:
     replacement = _maybe_replace_hand(
         me.hand, resolution.replacement_index, resolution.deck_after_play
     )
@@ -449,19 +540,21 @@ def _handle_standard_play(
 
 def step(
     state: State, action: Action, reward_scheme: RewardScheme | None = None
-) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+) -> tuple[State, float, bool, InfoDict]:
+    reward_scheme = reward_scheme or RewardScheme()
+    pending = state.public.pending_choice
+    if pending is not None:
+        return _resolve_pending_choice(state, action, reward_scheme)
     resolution = _resolve_action(state, action)
     if resolution is None:
         return state, 0.0, False, {"invalid": True}
-    reward_scheme = reward_scheme or RewardScheme()
     me_idx = state.public.turn
     me = state.players[me_idx]
-    effect = _apply_card_effect(
-        state.public.total, state.public.direction, resolution.used_card
-    )
-    base_info: dict[str, int | str | int | None] = {
-        "used_card": int(resolution.used_card.rank)
-    }
+    card = resolution.used_card
+    if card.rank in (Rank.R10, Rank.A):
+        return _start_pending_choice_state(state, me_idx, action, resolution)
+    effect = _apply_card_effect(state.public.total, state.public.direction, card)
+    base_info: InfoDict = {"used_card": int(card.rank)}
     history = state.public.history + ((me_idx, int(action)),)
     reward = reward_scheme.step_penalty
     return (
@@ -487,12 +580,8 @@ def step(
 
 def _start_total_from_card(card: Card) -> int:
     r = card.rank
-    if Rank.R2 <= r <= Rank.R7:
+    if Rank.R2 <= r <= Rank.R10:
         return int(r)
-    if r == Rank.R8 or r == Rank.R9:
-        return 0
-    if r == Rank.R10:
-        return 10
     if r == Rank.J:
         return 10
     if r == Rank.Q:
@@ -507,8 +596,8 @@ def _start_total_from_card(card: Card) -> int:
 
 
 def _round_draw_and_continue(
-    s: State, reward: float, base_info: dict[str, int | str | int | None]
-) -> tuple[State, float, bool, dict[str, int | str | int | None]]:
+    s: State, reward: float, base_info: InfoDict
+) -> tuple[State, float, bool, InfoDict]:
     next_state, done, winner = _start_round_after_event(
         players=s.players,
         alive=s.alive,
