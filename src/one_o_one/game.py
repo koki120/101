@@ -137,7 +137,12 @@ def _create_initial_players(
         player = PlayerState(lp=start_lp, hand=hand)
         return players_acc + (player,), remaining_deck
 
-    return reduce(deal, range(num_players), (tuple(), deck))
+    empty_players: tuple[PlayerState, ...] = tuple()
+    initial: tuple[tuple[PlayerState, ...], tuple[Card, ...]] = (
+        empty_players,
+        deck,
+    )
+    return reduce(deal, range(num_players), initial)
 
 
 def reset(
@@ -533,7 +538,12 @@ def _deal_round_players(
         hand, remaining_deck = _draw_hand(current_deck)
         return players_acc + (replace(player, hand=hand),), remaining_deck
 
-    return reduce(deal, enumerate(players), (tuple(), deck))
+    empty_players: tuple[PlayerState, ...] = tuple()
+    initial: tuple[tuple[PlayerState, ...], tuple[Card, ...]] = (
+        empty_players,
+        deck,
+    )
+    return reduce(deal, enumerate(players), initial)
 
 
 def _start_next_round(
