@@ -37,8 +37,10 @@ HTML_TEMPLATE = """
         body {{
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
+            gap: 20px;
             height: 100vh;
             margin: 0;
             background-color: #333;
@@ -77,6 +79,24 @@ HTML_TEMPLATE = """
             background-color: #2c2c2c;
             position: relative;
         }}
+        .field-area {{
+            margin-top: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }}
+        .field-label {{
+            font-size: 0.9em;
+            letter-spacing: 0.05em;
+            color: #ddd;
+        }}
+        .card.field-card {{
+            width: 72px;
+            height: 108px;
+            font-size: 1.8em;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }}
         #p0 {{ grid-area: p0; }} #p1 {{ grid-area: p1; }}
         #p2 {{ grid-area: p2; }} #p3 {{ grid-area: p3; }}
         .total-display {{ font-size: 4em; font-weight: bold; }}
@@ -113,6 +133,21 @@ HTML_TEMPLATE = """
             transition: opacity 0.5s;
             pointer-events: none; /* マウスイベントを無視 */
         }}
+        .controls {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 999px;
+            font-size: 0.95em;
+        }}
+        .controls label {{
+            font-weight: bold;
+        }}
+        .controls input[type="range"] {{
+            width: 180px;
+        }}
     </style>
 </head>
 <body>
@@ -121,11 +156,20 @@ HTML_TEMPLATE = """
             <div id="total-display" class="total-display">0</div>
             <div id="penalty-display" class="penalty-display">Penalty: x1</div>
             <div id="event-display"></div>
+            <div class="field-area">
+                <div class="field-label">場のカード</div>
+                <div id="field-card" class="card field-card">?</div>
+            </div>
         </div>
         <div id="p0" class="player-area"></div>
         <div id="p1" class="player-area"></div>
         <div id="p2" class="player-area"></div>
         <div id="p3" class="player-area"></div>
+    </div>
+    <div class="controls">
+        <label for="speed-control">再生速度</label>
+        <input type="range" id="speed-control" min="200" max="2000" step="100" value="800">
+        <span id="speed-display">0.8秒/ターン</span>
     </div>
 
     <script>
@@ -135,6 +179,9 @@ HTML_TEMPLATE = """
         const totalDisplay = document.getElementById('total-display');
         const penaltyDisplay = document.getElementById('penalty-display');
         const eventDisplay = document.getElementById('event-display');
+        const fieldCard = document.getElementById('field-card');
+        const speedControl = document.getElementById('speed-control');
+        const speedDisplay = document.getElementById('speed-display');
         // プレイヤー領域の取得
         // Array.from にオブジェクトを渡すと空配列となるため、
         // プレイヤー数に応じて DOM 要素を確実に取得する
@@ -144,6 +191,32 @@ HTML_TEMPLATE = """
         );
 
         let currentTurn = 0;
+        let turnInterval = Number(speedControl.value);
+        let gameTimeoutId = null;
+
+        function updateSpeedLabel() {{
+            speedDisplay.textContent = `${{(turnInterval / 1000).toFixed(1)}}秒/ターン`;
+        }}
+
+        function stopGameLoop() {{
+            if (gameTimeoutId !== null) {{
+                clearTimeout(gameTimeoutId);
+                gameTimeoutId = null;
+            }}
+        }}
+
+        function scheduleNextTurn() {{
+            stopGameLoop();
+            if (currentTurn < gameData.length) {{
+                gameTimeoutId = setTimeout(gameLoop, turnInterval);
+            }}
+        }}
+
+        speedControl.addEventListener('input', () => {{
+            turnInterval = Number(speedControl.value);
+            updateSpeedLabel();
+            scheduleNextTurn();
+        }});
 
         function showEvent(message) {{
             eventDisplay.textContent = message;
@@ -154,6 +227,7 @@ HTML_TEMPLATE = """
         function updateUI(data) {{
             totalDisplay.textContent = data.total_after;
             penaltyDisplay.textContent = `Penalty: x${{data.penalty}}`;
+            fieldCard.textContent = data.played_card || '-';
 
             playerAreas.forEach((area, i) => {{
                 area.classList.remove('active');
@@ -186,11 +260,18 @@ HTML_TEMPLATE = """
         function gameLoop() {{
             if (currentTurn >= gameData.length) {{
                 showEvent("GAME SET");
-                clearInterval(gameInterval);
+                stopGameLoop();
                 return;
             }}
             updateUI(gameData[currentTurn]);
             currentTurn++;
+
+            if (currentTurn >= gameData.length) {{
+                showEvent("GAME SET");
+                stopGameLoop();
+            }} else {{
+                scheduleNextTurn();
+            }}
         }}
 
         function initializeBoard() {{
@@ -198,6 +279,7 @@ HTML_TEMPLATE = """
             const initialData = gameData[0];
             const lps = initialData.lp_before_json || [10,10,10,10];
             const hands = initialData.hands_before_json || [];
+            fieldCard.textContent = '?';
             for (let i = 0; i < NUM_PLAYERS; i++) {{
                 const hand = hands[i] || ['?', '?'];
                 playerAreas[i].innerHTML = `
@@ -221,7 +303,8 @@ HTML_TEMPLATE = """
         }}
 
         initializeBoard();
-        const gameInterval = setInterval(gameLoop, 800); // 0.8秒ごとに進行
+        updateSpeedLabel();
+        scheduleNextTurn();
     </script>
 </body>
 </html>
